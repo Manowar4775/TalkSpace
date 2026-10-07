@@ -473,6 +473,24 @@
                         <h3>Account</h3>
                         <p>Your account is protected by Supabase Authentication.</p>
                         <p>Do not share your password or OTP with anyone.</p>
+                        <div class="deleteAccountSection">
+                            <h3>Delete Account</h3>
+                            <p>This permanently deletes your TalkSpace account and associated data.</p>
+                            <button id="deleteAccountButton" class="danger-button" type="button">Delete Account</button>
+                        </div>
+                        <dialog id="deleteAccountDialog" class="deleteAccountDialog" aria-labelledby="deleteAccountTitle" aria-describedby="deleteAccountWarning">
+                            <form method="dialog" class="deleteAccountDialogContent">
+                                <h2 id="deleteAccountTitle">Permanently delete your account?</h2>
+                                <p id="deleteAccountWarning">This action cannot be undone. Your TalkSpace account and associated data will be permanently removed. You can sign up again later, but it will be a new account.</p>
+                                <label for="deleteAccountConfirmation">Type DELETE to confirm</label>
+                                <input id="deleteAccountConfirmation" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+                                <p id="deleteAccountStatus" role="status" aria-live="polite"></p>
+                                <div class="deleteAccountDialogActions">
+                                    <button id="cancelDeleteAccountButton" class="secondary-button" type="button">Cancel</button>
+                                    <button id="confirmDeleteAccountButton" class="danger-button" type="button" disabled>Delete my account</button>
+                                </div>
+                            </form>
+                        </dialog>
                     </div>
                 </section>
 
@@ -728,6 +746,14 @@
                 Reject
             </button>
 
+            <button
+                id="minimizeIncomingCallBtn"
+                class="minimizeCallBtn"
+                type="button"
+            >
+                Minimize
+            </button>
+
         </div>
 
     </div>
@@ -784,6 +810,14 @@
                 Hang Up
             </button>
 
+            <button
+                id="minimizeActiveCallBtn"
+                class="minimizeCallBtn"
+                type="button"
+            >
+                Minimize
+            </button>
+
         </div>
 
 <!-- VIDEO CALL AREA -->
@@ -816,6 +850,21 @@
     </div>
 
 </div>
+
+<button
+    id="minimizedCallBubble"
+    class="minimizedCallBubble hidden"
+    type="button"
+    aria-label="Restore active call"
+>
+    <span id="minimizedCallAvatar" class="minimizedCallAvatar" aria-hidden="true">?</span>
+    <span class="minimizedCallDetails">
+        <strong id="minimizedCallPeerName">TalkSpace call</strong>
+        <span id="minimizedCallStatus">Call active</span>
+        <span id="minimizedCallDuration" class="hidden">00:00</span>
+    </span>
+    <span class="minimizedCallRestore">Tap to return</span>
+</button>
 
             </section>
 

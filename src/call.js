@@ -2,14 +2,32 @@ let peerConnection = null;
 let localStream = null;
 let currentCallUserId = null;
 let currentCallRole = null;
+let currentCallSessionId = null;
+let currentCallPhase = null;
+let callUiMinimized = false;
+let minimizedCallSessionId = null;
+let currentCallPeerName = "TalkSpace call";
+let currentCallPeerAvatarUrl = "";
+let currentCallStatus = "";
+let outgoingCallStartToken = null;
+let acceptingCallSessionId = null;
 let pendingIceCandidates = [];
+let pendingIncomingIceCandidates = [];
+let pendingIncomingOfferContext = null;
+let outgoingIceCandidates = [];
+let outgoingIceOfferReady = false;
+let outgoingIceWriteQueue = Promise.resolve();
 let callRingTimer = null;
+let callConnectionTimer = null;
+let callDisconnectedTimer = null;
 let callDurationTimer = null;
 let callDurationStartedAt = null;
 let callSignalsChannel = null;
 let callRealtimeGeneration = 0;
 
 const CALL_RING_TIMEOUT = 30000;
+const CALL_CONNECTION_TIMEOUT = 45000;
+const CALL_DISCONNECTED_RECOVERY_TIMEOUT = 15000;
 
 const rtcConfig = {
     iceServers: [
@@ -25,6 +43,13 @@ const rtcConfig = {
 // ======================================================
 
 function showCallPanel(id) {
+    if (
+        callUiMinimized &&
+        ["incomingCallPanel", "activeCallPanel"].includes(id)
+    ) {
+        return;
+    }
+
     const panel = document.getElementById(id);
 
     if (panel) {
@@ -43,11 +68,15 @@ function hideCallPanel(id) {
 
 
 function setCallStatus(text) {
+    currentCallStatus = text || "";
+
     const status = document.getElementById("callStatus");
 
     if (status) {
         status.textContent = text;
     }
+
+    syncMinimizedCallUi();
 }
 
 function setMuteButtonPresentation(button, isMuted) {
@@ -65,6 +94,129 @@ function setCallPeerName(name) {
     const peerName = document.getElementById("activeCallPeerName");
     if (peerName) {
         peerName.textContent = name || "TalkSpace call";
+    }
+}
+
+
+function setCallPeerPresentation(name, avatarUrl = "") {
+    currentCallPeerName = name || "TalkSpace call";
+    currentCallPeerAvatarUrl = avatarUrl || "";
+    setCallPeerName(currentCallPeerName);
+    syncMinimizedCallUi();
+}
+
+
+function isMinimizedCallCurrent() {
+    return Boolean(
+        callUiMinimized &&
+        minimizedCallSessionId &&
+        currentCallSessionId === minimizedCallSessionId &&
+        currentCallUserId
+    );
+}
+
+
+function getMinimizedCallStatus() {
+    if (currentCallRole === "receiver" && currentCallPhase === "ringing" && !peerConnection) {
+        return "Incoming call ringing";
+    }
+
+    if (currentCallPhase === "ringing") {
+        return "Calling";
+    }
+
+    return currentCallStatus || "Call active";
+}
+
+
+function renderMinimizedCallAvatar() {
+    const avatar = document.getElementById("minimizedCallAvatar");
+    if (!avatar) return;
+
+    if (typeof setProfileAvatar === "function") {
+        setProfileAvatar(avatar, {
+            display_name: currentCallPeerName,
+            avatar_url: currentCallPeerAvatarUrl
+        });
+        return;
+    }
+
+    avatar.textContent = Array.from(String(currentCallPeerName).trim())[0]?.toLocaleUpperCase() || "?";
+}
+
+
+function syncMinimizedCallUi() {
+    const bubble = document.getElementById("minimizedCallBubble");
+    if (!bubble) return;
+
+    if (!isMinimizedCallCurrent()) {
+        bubble.classList.add("hidden");
+        return;
+    }
+
+    const name = currentCallPeerName || "TalkSpace call";
+    const status = getMinimizedCallStatus();
+    const nameElement = document.getElementById("minimizedCallPeerName");
+    const statusElement = document.getElementById("minimizedCallStatus");
+    const duration = document.getElementById("minimizedCallDuration");
+
+    if (nameElement) nameElement.textContent = name;
+    if (statusElement) statusElement.textContent = status;
+    if (duration) {
+        const activeDuration = document.getElementById("callDuration");
+        duration.textContent = activeDuration?.textContent || "00:00";
+        duration.classList.toggle("hidden", !callDurationStartedAt);
+    }
+
+    renderMinimizedCallAvatar();
+    bubble.dataset.callState = currentCallPhase || "active";
+    bubble.setAttribute("aria-label", `Restore ${status.toLowerCase()} with ${name}`);
+    bubble.classList.remove("hidden");
+}
+
+
+function minimizeCallUi() {
+    if (!currentCallSessionId || !currentCallUserId) return false;
+
+    callUiMinimized = true;
+    minimizedCallSessionId = currentCallSessionId;
+    hideCallPanel("incomingCallPanel");
+    hideCallPanel("activeCallPanel");
+    syncMinimizedCallUi();
+    return true;
+}
+
+
+function restoreMinimizedCallUi() {
+    if (!isMinimizedCallCurrent()) {
+        resetMinimizedCallUi();
+        return false;
+    }
+
+    const showIncomingCall =
+        currentCallRole === "receiver" &&
+        currentCallPhase === "ringing" &&
+        !peerConnection;
+
+    callUiMinimized = false;
+    minimizedCallSessionId = null;
+    syncMinimizedCallUi();
+    showCallPanel(showIncomingCall ? "incomingCallPanel" : "activeCallPanel");
+    return true;
+}
+
+
+function resetMinimizedCallUi() {
+    callUiMinimized = false;
+    minimizedCallSessionId = null;
+    currentCallPeerName = "TalkSpace call";
+    currentCallPeerAvatarUrl = "";
+    currentCallStatus = "";
+
+    const bubble = document.getElementById("minimizedCallBubble");
+    if (bubble) {
+        bubble.classList.add("hidden");
+        bubble.removeAttribute("data-call-state");
     }
 }
 
@@ -100,6 +252,7 @@ function startCallDuration(connection, generation) {
         const minutes = Math.floor(elapsedSeconds / 60).toString().padStart(2, "0");
         const seconds = (elapsedSeconds % 60).toString().padStart(2, "0");
         if (duration) duration.textContent = `${minutes}:${seconds}`;
+        syncMinimizedCallUi();
     };
 
     renderDuration();
@@ -125,8 +278,177 @@ function clearCallRingTimer() {
 
 }
 
+function clearCallConnectionTimer() {
+    if (callConnectionTimer) {
+        clearTimeout(callConnectionTimer);
+        callConnectionTimer = null;
+    }
+}
 
-function startCallRingTimer() {
+function clearCallDisconnectedTimer() {
+    if (callDisconnectedTimer) {
+        clearTimeout(callDisconnectedTimer);
+        callDisconnectedTimer = null;
+    }
+}
+
+function createCallSessionId() {
+    if (globalThis.crypto?.randomUUID) {
+        return globalThis.crypto.randomUUID();
+    }
+
+    return `${Date.now().toString(36)}-${Math.random().toString(36).slice(2)}`;
+}
+
+function makeCallSignalData(sessionId, payload) {
+    return { session_id: sessionId, payload };
+}
+
+function readCallSignalData(signal) {
+    const data = signal?.signal_data;
+    if (
+        !data ||
+        typeof data !== "object" ||
+        typeof data.session_id !== "string" ||
+        !data.session_id
+    ) {
+        return null;
+    }
+
+    return { sessionId: data.session_id, payload: data.payload };
+}
+
+function isCallSessionCurrent(sessionId, peerUserId = null) {
+    return Boolean(
+        sessionId &&
+        currentCallSessionId === sessionId &&
+        (!peerUserId || currentCallUserId === peerUserId)
+    );
+}
+
+function isOutgoingCallStartCurrent(startToken, peerUserId) {
+    return Boolean(
+        startToken &&
+        outgoingCallStartToken === startToken &&
+        startToken.generation === callRealtimeGeneration &&
+        currentUser?.id === startToken.userId &&
+        isCallSessionCurrent(startToken.sessionId, peerUserId)
+    );
+}
+
+function startCallConnectionTimer(connection, generation, sessionId) {
+    clearCallConnectionTimer();
+
+    if (!connection || connection.connectionState === "connected") {
+        return;
+    }
+
+    callConnectionTimer = setTimeout(() => {
+        callConnectionTimer = null;
+
+        if (
+            peerConnection !== connection ||
+            generation !== callRealtimeGeneration ||
+            !isCallSessionCurrent(sessionId) ||
+            connection.connectionState === "connected"
+        ) {
+            return;
+        }
+
+        endCallAfterConnectionFailure(sessionId, "Could not connect. The call ended.");
+    }, CALL_CONNECTION_TIMEOUT);
+}
+
+function endCallAfterConnectionFailure(sessionId, feedback) {
+    if (!isCallSessionCurrent(sessionId)) return false;
+
+    const targetUserId = currentCallUserId;
+    const senderUserId = currentUser?.id;
+    if (!cleanupCall(sessionId)) return false;
+
+    if (typeof message === "function") message(feedback);
+    if (targetUserId && senderUserId) {
+        client
+            .from("call_signals")
+            .insert({
+                caller_id: senderUserId,
+                receiver_id: targetUserId,
+                signal_type: "hangup",
+                signal_data: makeCallSignalData(sessionId, null)
+            })
+            .then(({ error }) => {
+                if (error) console.error("CALL CONNECTION FAILURE SIGNAL ERROR:", error);
+            })
+            .catch(error => console.error("CALL CONNECTION FAILURE SIGNAL ERROR:", error));
+    }
+    return true;
+}
+
+function startCallDisconnectedTimer(connection, generation, sessionId) {
+    clearCallDisconnectedTimer();
+    callDisconnectedTimer = setTimeout(() => {
+        callDisconnectedTimer = null;
+        if (
+            peerConnection !== connection ||
+            generation !== callRealtimeGeneration ||
+            !isCallSessionCurrent(sessionId) ||
+            connection.connectionState === "connected"
+        ) {
+            return;
+        }
+
+        endCallAfterConnectionFailure(sessionId, "Connection lost. The call ended.");
+    }, CALL_DISCONNECTED_RECOVERY_TIMEOUT);
+}
+
+function insertOutgoingIceCandidate(candidate, connection, generation, targetUserId, senderUserId, sessionId) {
+    outgoingIceWriteQueue = outgoingIceWriteQueue
+        .then(async () => {
+            if (
+                peerConnection !== connection ||
+                generation !== callRealtimeGeneration ||
+                !isCallSessionCurrent(sessionId, targetUserId) ||
+                !currentUser ||
+                currentUser.id !== senderUserId
+            ) {
+                return;
+            }
+
+            const { error } = await client
+                .from("call_signals")
+                .insert({
+                    caller_id: senderUserId,
+                    receiver_id: targetUserId,
+                    signal_type: "candidate",
+                    signal_data: makeCallSignalData(sessionId, candidate)
+                });
+
+            if (error) throw error;
+        })
+        .catch(error => console.error("ICE CANDIDATE ERROR:", error));
+}
+
+function markOutgoingIceOfferSent(connection, generation, targetUserId, senderUserId, sessionId) {
+    if (
+        peerConnection !== connection ||
+        generation !== callRealtimeGeneration ||
+        !isCallSessionCurrent(sessionId, targetUserId) ||
+        !currentUser ||
+        currentUser.id !== senderUserId
+    ) {
+        return;
+    }
+
+    outgoingIceOfferReady = true;
+    const stagedCandidates = outgoingIceCandidates;
+    outgoingIceCandidates = [];
+    for (const candidate of stagedCandidates) {
+        insertOutgoingIceCandidate(candidate, connection, generation, targetUserId, senderUserId, sessionId);
+    }
+}
+
+
+function startCallRingTimer(sessionId) {
 
     clearCallRingTimer();
     const timerGeneration = callRealtimeGeneration;
@@ -135,7 +457,11 @@ function startCallRingTimer() {
         setTimeout(
             async () => {
 
-                if (timerGeneration !== callRealtimeGeneration) {
+                if (
+                    timerGeneration !== callRealtimeGeneration ||
+                    !isCallSessionCurrent(sessionId) ||
+                    currentCallPhase !== "ringing"
+                ) {
                     return;
                 }
 
@@ -148,7 +474,8 @@ function startCallRingTimer() {
 
                 if (
                     !targetUserId ||
-                    !role
+                    !role ||
+                    currentCallSessionId !== sessionId
                 ) {
                     return;
                 }
@@ -177,7 +504,7 @@ function startCallRingTimer() {
                                     "timeout",
 
                                 signal_data:
-                                    null
+                                    makeCallSignalData(sessionId, null)
                             });
 
                         if (error) {
@@ -193,12 +520,17 @@ function startCallRingTimer() {
 
                     }
 
-                    if (timerGeneration !== callRealtimeGeneration) {
+                    if (
+                        timerGeneration !== callRealtimeGeneration ||
+                        !isCallSessionCurrent(sessionId, targetUserId) ||
+                        currentCallRole !== role ||
+                        currentCallPhase !== "ringing"
+                    ) {
                         return;
                     }
 
 
-                    cleanupCall();
+                    cleanupCall(sessionId);
 
 
                     if (
@@ -223,7 +555,7 @@ function startCallRingTimer() {
                     role === "receiver"
                 ) {
 
-                    cleanupCall();
+                    cleanupCall(sessionId);
 
                 }
 
@@ -241,7 +573,8 @@ function startCallRingTimer() {
 // Creates WebRTC transport and wires media/ICE callbacks to the current call generation.
 function createPeerConnection(
     targetUserId,
-    role
+    role,
+    sessionId
 ) {
 
     peerConnection =
@@ -255,6 +588,17 @@ function createPeerConnection(
 
     currentCallRole =
         role;
+    currentCallSessionId = sessionId;
+
+    if (role === "caller") {
+        outgoingIceCandidates = [];
+        outgoingIceOfferReady = false;
+        outgoingIceWriteQueue = Promise.resolve();
+    }
+
+    const observedConnection = peerConnection;
+    const observedGeneration = callRealtimeGeneration;
+    const senderUserId = currentUser?.id;
 
 
     // --------------------------------------------------
@@ -263,6 +607,14 @@ function createPeerConnection(
 
     peerConnection.ontrack =
         event => {
+
+            if (
+                peerConnection !== observedConnection ||
+                observedGeneration !== callRealtimeGeneration ||
+                !isCallSessionCurrent(sessionId, targetUserId)
+            ) {
+                return;
+            }
 
             const stream =
                 event.streams[0];
@@ -358,46 +710,33 @@ function createPeerConnection(
     // --------------------------------------------------
 
     peerConnection.onicecandidate =
-        async event => {
+        event => {
 
             if (
                 !event.candidate ||
-                !currentUser
+                !currentUser ||
+                currentUser.id !== senderUserId ||
+                peerConnection !== observedConnection ||
+                observedGeneration !== callRealtimeGeneration ||
+                !isCallSessionCurrent(sessionId, targetUserId)
             ) {
                 return;
             }
 
 
-            try {
-
-                const { error } = await client
-                    .from("call_signals")
-                    .insert({
-                        caller_id:
-                            currentUser.id,
-
-                        receiver_id:
-                            targetUserId,
-
-                        signal_type:
-                            "candidate",
-
-                        signal_data:
-                            event.candidate
-                    });
-
-                if (error) {
-                    console.error("ICE CANDIDATE ERROR:", error);
-                }
-
-            } catch (error) {
-
-                console.error(
-                    "ICE CANDIDATE ERROR:",
-                    error
-                );
-
+            if (role === "caller" && !outgoingIceOfferReady) {
+                outgoingIceCandidates.push(event.candidate);
+                return;
             }
+
+            insertOutgoingIceCandidate(
+                event.candidate,
+                observedConnection,
+                observedGeneration,
+                targetUserId,
+                senderUserId,
+                sessionId
+            );
 
         };
 
@@ -406,15 +745,14 @@ function createPeerConnection(
     // CALL CONNECTION STATE
     // --------------------------------------------------
 
-    const observedConnection = peerConnection;
-    const observedGeneration = callRealtimeGeneration;
     observedConnection.onconnectionstatechange =
         () => {
 
             if (
                 !peerConnection ||
                 peerConnection !== observedConnection ||
-                observedGeneration !== callRealtimeGeneration
+                observedGeneration !== callRealtimeGeneration ||
+                !isCallSessionCurrent(sessionId, targetUserId)
             ) {
                 return;
             }
@@ -436,6 +774,9 @@ function createPeerConnection(
             ) {
 
                 clearCallRingTimer();
+                clearCallConnectionTimer();
+                clearCallDisconnectedTimer();
+                currentCallPhase = "connected";
 
                 setCallStatus(
                     "Connected"
@@ -456,6 +797,17 @@ function createPeerConnection(
                     "Connection lost"
                 );
 
+                if (state === "failed") {
+                    endCallAfterConnectionFailure(sessionId, "Connection lost. The call ended.");
+                    return;
+                }
+
+                startCallDisconnectedTimer(
+                    observedConnection,
+                    observedGeneration,
+                    sessionId
+                );
+
             }
 
 
@@ -464,7 +816,7 @@ function createPeerConnection(
                 "closed"
             ) {
 
-                cleanupCall();
+                cleanupCall(sessionId);
 
             }
 
@@ -531,7 +883,57 @@ async function startVoiceCall(
     isVideoCall = false
 ) {
 
-    const callGeneration = callRealtimeGeneration;
+    if (
+        typeof client === "undefined" ||
+        typeof currentUser === "undefined" ||
+        !currentUser
+    ) {
+        throw new Error("TalkSpace is not signed in.");
+    }
+
+    if (!targetUserId || targetUserId === currentUser.id) {
+        throw new Error("Invalid call target.");
+    }
+
+    if (
+        outgoingCallStartToken ||
+        peerConnection ||
+        currentCallSessionId ||
+        currentCallUserId
+    ) {
+        throw new Error("A call is already active or starting.");
+    }
+
+    const startToken = {
+        sessionId: createCallSessionId(),
+        generation: callRealtimeGeneration,
+        userId: currentUser.id
+    };
+    outgoingCallStartToken = startToken;
+    currentCallSessionId = startToken.sessionId;
+    currentCallUserId = targetUserId;
+    currentCallRole = "caller";
+    currentCallPhase = "preparing";
+
+    try {
+        return await startVoiceCallAttempt(targetUserId, isVideoCall, startToken);
+    } catch (error) {
+        cleanupCall(startToken.sessionId);
+        throw error;
+    } finally {
+        if (outgoingCallStartToken === startToken) {
+            outgoingCallStartToken = null;
+        }
+    }
+}
+
+async function startVoiceCallAttempt(
+    targetUserId,
+    isVideoCall,
+    startToken
+) {
+
+    const callGeneration = startToken.generation;
 
     if (
         typeof client ===
@@ -569,6 +971,10 @@ async function startVoiceCall(
         selectionGeneration
     );
 
+    if (!isOutgoingCallStartCurrent(startToken, targetUserId)) {
+        throw new Error("The call ended before it could start.");
+    }
+
     if (!mayCall) {
         throw new Error(
             currentUser?.id === callUserId && callRealtimeGeneration === callGeneration
@@ -579,23 +985,16 @@ async function startVoiceCall(
 
 
     if (
-        peerConnection ||
-        currentCallUserId
-    ) {
-
-        throw new Error(
-            "A call is already active."
-        );
-
-    }
-
-    if (
         typeof isSelectedCallPeerOnline !== "function" ||
         !(await isSelectedCallPeerOnline(targetUserId))
     ) {
         throw new Error(
             "Calls are unavailable while this user is offline."
         );
+    }
+
+    if (!isOutgoingCallStartCurrent(startToken, targetUserId)) {
+        throw new Error("The call ended before media could be acquired.");
     }
 
 
@@ -615,8 +1014,7 @@ async function startVoiceCall(
             });
 
     if (
-        callGeneration !== callRealtimeGeneration ||
-        currentUser?.id !== callUserId ||
+        !isOutgoingCallStartCurrent(startToken, targetUserId) ||
         selectedUser?.id !== targetUserId ||
         selectedChatGeneration !== selectionGeneration
     ) {
@@ -629,6 +1027,11 @@ async function startVoiceCall(
         throw new Error(
             "Calls are unavailable while this user is offline."
         );
+    }
+
+    if (!isOutgoingCallStartCurrent(startToken, targetUserId)) {
+        acquiredStream.getTracks().forEach(track => track.stop());
+        throw new Error("The call ended before media setup completed.");
     }
 
     if (
@@ -645,6 +1048,11 @@ async function startVoiceCall(
         );
     }
 
+    if (!isOutgoingCallStartCurrent(startToken, targetUserId)) {
+        acquiredStream.getTracks().forEach(track => track.stop());
+        throw new Error("The call ended before signaling could begin.");
+    }
+
     localStream = acquiredStream;
 
 
@@ -654,7 +1062,8 @@ async function startVoiceCall(
 
     createPeerConnection(
         targetUserId,
-        "caller"
+        "caller",
+        startToken.sessionId
     );
 
     const outgoingConnection = peerConnection;
@@ -682,8 +1091,8 @@ async function startVoiceCall(
         await outgoingConnection
             .createOffer();
 
-    if (callGeneration !== callRealtimeGeneration || !currentUser || peerConnection !== outgoingConnection) {
-        if (peerConnection === outgoingConnection) cleanupCall();
+    if (callGeneration !== callRealtimeGeneration || !currentUser || peerConnection !== outgoingConnection || !isCallSessionCurrent(startToken.sessionId, targetUserId)) {
+        if (peerConnection === outgoingConnection) cleanupCall(startToken.sessionId);
         throw new Error("The call ended before signaling completed.");
     }
 
@@ -693,14 +1102,14 @@ async function startVoiceCall(
             offer
         );
 
-    if (callGeneration !== callRealtimeGeneration || !currentUser || peerConnection !== outgoingConnection) {
-        if (peerConnection === outgoingConnection) cleanupCall();
+    if (callGeneration !== callRealtimeGeneration || !currentUser || peerConnection !== outgoingConnection || !isCallSessionCurrent(startToken.sessionId, targetUserId)) {
+        if (peerConnection === outgoingConnection) cleanupCall(startToken.sessionId);
         throw new Error("The call ended before signaling completed.");
     }
 
     if (!(await isSelectedCallPeerOnline(targetUserId))) {
         if (peerConnection === outgoingConnection) {
-            cleanupCall();
+            cleanupCall(startToken.sessionId);
         }
 
         throw new Error(
@@ -717,12 +1126,16 @@ async function startVoiceCall(
         ))
     ) {
         if (peerConnection === outgoingConnection) {
-            cleanupCall();
+            cleanupCall(startToken.sessionId);
         }
 
         throw new Error(
             "Calls are available only to verified friends."
         );
+    }
+
+    if (!isOutgoingCallStartCurrent(startToken, targetUserId)) {
+        throw new Error("The call ended before its offer could be sent.");
     }
 
     // --------------------------------------------------
@@ -744,7 +1157,7 @@ async function startVoiceCall(
                     "offer",
 
                 signal_data:
-                    offer
+                    makeCallSignalData(startToken.sessionId, offer)
             }));
     } catch (signalError) {
         error = signalError;
@@ -760,7 +1173,7 @@ async function startVoiceCall(
 
 
         if (peerConnection === outgoingConnection) {
-            cleanupCall();
+            cleanupCall(startToken.sessionId);
         }
 
 
@@ -771,10 +1184,19 @@ async function startVoiceCall(
     if (
         callGeneration !== callRealtimeGeneration ||
         !currentUser ||
-        peerConnection !== outgoingConnection
+        peerConnection !== outgoingConnection ||
+        !isCallSessionCurrent(startToken.sessionId, targetUserId)
     ) {
         throw new Error("The call ended before signaling completed.");
     }
+
+    markOutgoingIceOfferSent(
+        outgoingConnection,
+        callGeneration,
+        targetUserId,
+        callUserId,
+        startToken.sessionId
+    );
 
     if (isVideoCall) {
         const localVideo = document.getElementById("localVideo");
@@ -792,7 +1214,10 @@ async function startVoiceCall(
         }
     }
 
-    setCallPeerName(selectedUser?.display_name || selectedUser?.username || "Friend");
+    setCallPeerPresentation(
+        selectedUser?.display_name || selectedUser?.username || "Friend",
+        selectedUser?.avatar_url
+    );
     const activeCallTitle = document.getElementById("activeCallTitle");
     if (activeCallTitle) activeCallTitle.textContent = isVideoCall ? "Video call" : "Voice call";
     resetCallDuration();
@@ -806,12 +1231,11 @@ async function startVoiceCall(
 
 
     // Start 30-second ringing timer
-    startCallRingTimer();
+    currentCallPhase = "ringing";
+    startCallRingTimer(startToken.sessionId);
 
     } catch (error) {
-        if (peerConnection === outgoingConnection) {
-            cleanupCall();
-        }
+        cleanupCall(startToken.sessionId);
         throw error;
     }
 
@@ -826,7 +1250,31 @@ async function startVoiceCall(
 // Revalidates the incoming peer before acquiring media and sending the answer signal.
 async function acceptIncomingCall(
     callerId,
-    offer
+    offer,
+    sessionId
+) {
+    if (
+        !sessionId ||
+        !isCallSessionCurrent(sessionId, callerId) ||
+        acceptingCallSessionId
+    ) {
+        return;
+    }
+
+    acceptingCallSessionId = sessionId;
+    try {
+        return await acceptIncomingCallAttempt(callerId, offer, sessionId);
+    } finally {
+        if (acceptingCallSessionId === sessionId) {
+            acceptingCallSessionId = null;
+        }
+    }
+}
+
+async function acceptIncomingCallAttempt(
+    callerId,
+    offer,
+    sessionId
 ) {
 
     const callGeneration = callRealtimeGeneration;
@@ -835,22 +1283,25 @@ async function acceptIncomingCall(
 
     if (
         !callerId ||
-        !offer
+        !offer ||
+        !isCallSessionCurrent(sessionId, callerId)
     ) {
         return;
     }
 
+    const initiallyPermitted = await verifyCallPeerPermissions(
+        callerId,
+        callUserId,
+        callGeneration
+    );
+    if (!isCallSessionCurrent(sessionId, callerId)) return;
+
     if (
-        currentCallUserId !== callerId ||
         currentCallRole !== "receiver" ||
-        !(await verifyCallPeerPermissions(
-            callerId,
-            callUserId,
-            callGeneration
-        ))
+        !initiallyPermitted
     ) {
-        if (currentCallUserId === callerId) {
-            cleanupCall();
+        if (isCallSessionCurrent(sessionId, callerId)) {
+            cleanupCall(sessionId);
         }
         if (typeof message === "function") {
             message("This call is unavailable because the friendship or block status changed.");
@@ -862,18 +1313,13 @@ async function acceptIncomingCall(
     clearCallRingTimer();
 
 
-    if (peerConnection) {
-
-        cleanupCall();
-
-    }
-
-
     currentCallUserId =
         callerId;
 
     currentCallRole =
         "receiver";
+    currentCallSessionId = sessionId;
+    currentCallPhase = "connecting";
 
 
     // --------------------------------------------------
@@ -908,19 +1354,28 @@ async function acceptIncomingCall(
         if (
             callGeneration !== callRealtimeGeneration ||
             currentUser?.id !== callUserId ||
-            currentCallUserId !== callerId
+            currentCallUserId !== callerId ||
+            currentCallSessionId !== sessionId
         ) {
             acquiredStream.getTracks().forEach(track => track.stop());
             return;
         }
 
-        if (!(await verifyCallPeerPermissions(
+        const mediaPermissionValid = await verifyCallPeerPermissions(
             callerId,
             callUserId,
             callGeneration
-        ))) {
+        );
+        if (
+            !isCallSessionCurrent(sessionId, callerId) ||
+            currentUser?.id !== callUserId
+        ) {
             acquiredStream.getTracks().forEach(track => track.stop());
-            if (currentCallUserId === callerId) cleanupCall();
+            return;
+        }
+        if (!mediaPermissionValid) {
+            acquiredStream.getTracks().forEach(track => track.stop());
+            if (isCallSessionCurrent(sessionId, callerId)) cleanupCall(sessionId);
             return;
         }
 
@@ -982,7 +1437,8 @@ async function acceptIncomingCall(
 
         createPeerConnection(
             callerId,
-            "receiver"
+            "receiver",
+            sessionId
         );
 
         acceptedConnection = peerConnection;
@@ -1013,17 +1469,24 @@ async function acceptIncomingCall(
                 )
             );
 
-        if (callGeneration !== callRealtimeGeneration || !currentUser || peerConnection !== acceptedConnection) {
-            if (peerConnection === acceptedConnection) cleanupCall();
+        if (callGeneration !== callRealtimeGeneration || !currentUser || peerConnection !== acceptedConnection || !isCallSessionCurrent(sessionId, callerId)) {
+            if (peerConnection === acceptedConnection) cleanupCall(sessionId);
             return;
         }
 
-        if (!(await verifyCallPeerPermissions(
+        const remoteDescriptionPermissionValid = await verifyCallPeerPermissions(
             callerId,
             callUserId,
             callGeneration
-        ))) {
-            if (peerConnection === acceptedConnection) cleanupCall();
+        );
+        if (
+            !isCallSessionCurrent(sessionId, callerId) ||
+            peerConnection !== acceptedConnection
+        ) {
+            return;
+        }
+        if (!remoteDescriptionPermissionValid) {
+            if (peerConnection === acceptedConnection) cleanupCall(sessionId);
             return;
         }
 
@@ -1035,20 +1498,30 @@ if (
     pendingIceCandidates.length > 0
 ) {
 
+    const queuedCandidates = pendingIceCandidates;
+    pendingIceCandidates = [];
+
     window.TalkSpaceLogger?.debug(
         "PROCESSING QUEUED ICE CANDIDATES:",
-        pendingIceCandidates.length
+        queuedCandidates.length
     );
 
 
     for (
         const candidate
-        of pendingIceCandidates
+        of queuedCandidates
     ) {
+
+        if (
+            peerConnection !== acceptedConnection ||
+            !isCallSessionCurrent(sessionId, callerId)
+        ) {
+            return;
+        }
 
         try {
 
-            await peerConnection
+            await acceptedConnection
                 .addIceCandidate(
                     new RTCIceCandidate(
                         candidate
@@ -1067,9 +1540,6 @@ if (
     }
 
 
-    pendingIceCandidates =
-        [];
-
 }    
 
 
@@ -1081,8 +1551,8 @@ if (
             await acceptedConnection
                 .createAnswer();
 
-        if (callGeneration !== callRealtimeGeneration || !currentUser || peerConnection !== acceptedConnection) {
-            if (peerConnection === acceptedConnection) cleanupCall();
+        if (callGeneration !== callRealtimeGeneration || !currentUser || peerConnection !== acceptedConnection || !isCallSessionCurrent(sessionId, callerId)) {
+            if (peerConnection === acceptedConnection) cleanupCall(sessionId);
             return;
         }
 
@@ -1092,8 +1562,8 @@ if (
                 answer
             );
 
-        if (callGeneration !== callRealtimeGeneration || !currentUser || peerConnection !== acceptedConnection) {
-            if (peerConnection === acceptedConnection) cleanupCall();
+        if (callGeneration !== callRealtimeGeneration || !currentUser || peerConnection !== acceptedConnection || !isCallSessionCurrent(sessionId, callerId)) {
+            if (peerConnection === acceptedConnection) cleanupCall(sessionId);
             return;
         }
 
@@ -1102,17 +1572,19 @@ if (
         // SEND ANSWER
         // --------------------------------------------------
 
+        const answerPermissionValid = await verifyCallPeerPermissions(
+            callerId,
+            callUserId,
+            callGeneration
+        );
         if (
             currentUser?.id !== callUserId ||
             currentCallUserId !== callerId ||
+            currentCallSessionId !== sessionId ||
             peerConnection !== acceptedConnection ||
-            !(await verifyCallPeerPermissions(
-                callerId,
-                callUserId,
-                callGeneration
-            ))
+            !answerPermissionValid
         ) {
-            if (peerConnection === acceptedConnection) cleanupCall();
+            if (peerConnection === acceptedConnection) cleanupCall(sessionId);
             return;
         }
 
@@ -1133,7 +1605,7 @@ if (
                         "answer",
 
                     signal_data:
-                        answer
+                        makeCallSignalData(sessionId, answer)
 
                 });
 
@@ -1152,10 +1624,14 @@ if (
         if (
             callGeneration !== callRealtimeGeneration ||
             !currentUser ||
-            peerConnection !== acceptedConnection
+            peerConnection !== acceptedConnection ||
+            !isCallSessionCurrent(sessionId, callerId)
         ) {
             return;
         }
+
+        startCallConnectionTimer(acceptedConnection, callGeneration, sessionId);
+        currentCallPhase = "connecting";
 
 
         // --------------------------------------------------
@@ -1171,7 +1647,9 @@ if (
             "activeCallPanel"
         );
 
-        setCallPeerName(document.getElementById("incomingCallerName")?.textContent || "Friend");
+        setCallPeerPresentation(
+            document.getElementById("incomingCallerName")?.textContent || "Friend"
+        );
         const activeCallTitle = document.getElementById("activeCallTitle");
         if (activeCallTitle) activeCallTitle.textContent = isVideoCall ? "Video call" : "Voice call";
         resetCallDuration();
@@ -1188,7 +1666,8 @@ if (
 
         if (
             callGeneration !== callRealtimeGeneration ||
-            (acceptedConnection && peerConnection !== acceptedConnection)
+            (acceptedConnection && peerConnection !== acceptedConnection) ||
+            !isCallSessionCurrent(sessionId, callerId)
         ) {
             return;
         }
@@ -1203,8 +1682,7 @@ if (
         // SAVE CALLER ID BEFORE CLEANUP
         // --------------------------------------------------
 
-        const failedCallerId =
-            currentCallUserId;
+        const failedCallerId = currentCallUserId;
 
 
         // --------------------------------------------------
@@ -1231,10 +1709,10 @@ if (
                         signal_type:
                             "reject",
 
-                        signal_data: {
-                            reason:
-                                "accept_failed"
-                        }
+                        signal_data: makeCallSignalData(
+                            sessionId,
+                            { reason: "accept_failed" }
+                        )
 
                     });
 
@@ -1257,66 +1735,8 @@ if (
         }
 
 
-        // --------------------------------------------------
-        // STOP LOCAL MEDIA
-        // --------------------------------------------------
-
-        if (localStream) {
-
-            localStream
-                .getTracks()
-                .forEach(
-                    track => {
-
-                        track.stop();
-
-                    }
-                );
-
-            localStream =
-                null;
-
-        }
-
-
-        // --------------------------------------------------
-        // CLOSE PEER CONNECTION
-        // --------------------------------------------------
-
-        if (peerConnection) {
-
-            try {
-
-                peerConnection.close();
-
-            } catch (closeError) {
-
-                console.error(
-                    "PEER CLOSE ERROR:",
-                    closeError
-                );
-
-            }
-
-            peerConnection =
-                null;
-
-        }
-
-
-        currentCallUserId =
-            null;
-
-        currentCallRole =
-            null;
-
-
-        window.pendingCallOffer =
-            null;
-
-        pendingIceCandidates = [];
-
-        cleanupCall();
+        if (!isCallSessionCurrent(sessionId, callerId)) return;
+        cleanupCall(sessionId);
 
 
         // --------------------------------------------------
@@ -1384,7 +1804,8 @@ if (
 
 // Rejects the current incoming call and releases its ringing state and resources.
 async function rejectIncomingCall(
-    callerId
+    callerId,
+    sessionId = currentCallSessionId
 ) {
 
     const rejectGeneration = callRealtimeGeneration;
@@ -1395,6 +1816,8 @@ async function rejectIncomingCall(
 
     if (
         !targetCallerId ||
+        !sessionId ||
+        !isCallSessionCurrent(sessionId, targetCallerId) ||
         !currentUser
     ) {
         console.error(
@@ -1423,7 +1846,7 @@ async function rejectIncomingCall(
                     "reject",
 
                 signal_data:
-                    null
+                    makeCallSignalData(sessionId, null)
             }));
     } catch (signalError) {
         error = signalError;
@@ -1448,19 +1871,19 @@ async function rejectIncomingCall(
 
         }
 
-        if (rejectGeneration === callRealtimeGeneration) {
-            cleanupCall();
+        if (rejectGeneration === callRealtimeGeneration && isCallSessionCurrent(sessionId, targetCallerId)) {
+            cleanupCall(sessionId);
         }
         return;
     }
 
-    if (rejectGeneration !== callRealtimeGeneration) {
+    if (rejectGeneration !== callRealtimeGeneration || !isCallSessionCurrent(sessionId, targetCallerId)) {
         return;
     }
 
 
     // Clean up the incoming call state.
-    cleanupCall();
+    cleanupCall(sessionId);
 
 
     if (
@@ -1478,9 +1901,10 @@ async function rejectIncomingCall(
 
 
 // Rejects a denied offer without touching an unrelated active call on this device.
-async function rejectUnauthorizedIncomingCall(callerId, generation) {
+async function rejectUnauthorizedIncomingCall(callerId, sessionId, generation) {
     if (
         !callerId ||
+        !sessionId ||
         !currentUser ||
         generation !== callRealtimeGeneration
     ) {
@@ -1494,7 +1918,7 @@ async function rejectUnauthorizedIncomingCall(callerId, generation) {
                 caller_id: currentUser.id,
                 receiver_id: callerId,
                 signal_type: "reject",
-                signal_data: { reason: "unavailable" }
+                signal_data: makeCallSignalData(sessionId, { reason: "unavailable" })
             });
         if (error) {
             console.error("UNAUTHORIZED CALL REJECT SIGNAL ERROR:", error);
@@ -1505,10 +1929,11 @@ async function rejectUnauthorizedIncomingCall(callerId, generation) {
 
     if (
         generation === callRealtimeGeneration &&
+        currentCallSessionId === sessionId &&
         currentCallUserId === callerId &&
         currentCallRole === "receiver"
     ) {
-        cleanupCall();
+        cleanupCall(sessionId);
     }
     return true;
 }
@@ -1520,11 +1945,13 @@ async function rejectUnauthorizedIncomingCall(callerId, generation) {
 
 // Notifies a new caller that this client is busy without disturbing its current call.
 async function rejectBusyIncomingCall(
-    callerId
+    callerId,
+    sessionId
 ) {
 
     if (
         !callerId ||
+        !sessionId ||
         !currentUser
     ) {
         console.error(
@@ -1550,10 +1977,7 @@ async function rejectBusyIncomingCall(
                     "reject",
 
                 signal_data:
-                    {
-                        reason:
-                            "busy"
-                    }
+                    makeCallSignalData(sessionId, { reason: "busy" })
             }));
     } catch (signalError) {
         error = signalError;
@@ -1592,6 +2016,25 @@ if (
     return;
 }
 
+const callSignalData = readCallSignalData(signal);
+if (!callSignalData) {
+    window.TalkSpaceLogger?.debug("Ignoring call signal without a session ID.");
+    return;
+}
+const { sessionId, payload: signalPayload } = callSignalData;
+
+if (signal.signal_type !== "offer") {
+    const matchesActiveCall =
+        currentCallSessionId === sessionId &&
+        currentCallUserId === signal.caller_id;
+    const matchesPendingCall =
+        pendingIncomingOfferContext?.sessionId === sessionId &&
+        pendingIncomingOfferContext.callerId === signal.caller_id &&
+        pendingIncomingOfferContext.receiverId === currentUser.id &&
+        pendingIncomingOfferContext.generation === generation;
+    if (!matchesActiveCall && !matchesPendingCall) return;
+}
+
 
 window.TalkSpaceLogger?.debug(
     "HANDLE CALL SIGNAL:",
@@ -1617,6 +2060,28 @@ if (
 
 const incomingUserId = currentUser.id;
 const incomingPeerId = signal.caller_id;
+if (
+    (currentCallSessionId === sessionId && currentCallUserId === incomingPeerId) ||
+    pendingIncomingOfferContext?.sessionId === sessionId
+) {
+    return;
+}
+
+const incomingOfferContext =
+    !peerConnection && !currentCallSessionId && !currentCallUserId &&
+    !outgoingCallStartToken && !pendingIncomingOfferContext
+        ? {
+            callerId: incomingPeerId,
+            receiverId: incomingUserId,
+            generation,
+            sessionId
+        }
+        : null;
+
+if (incomingOfferContext) {
+    pendingIncomingOfferContext = incomingOfferContext;
+    pendingIncomingIceCandidates = [];
+}
 
 
 // --------------------------------------------------
@@ -1635,12 +2100,24 @@ if (
     generation !== callRealtimeGeneration ||
     currentUser?.id !== incomingUserId
 ) {
+    if (pendingIncomingOfferContext === incomingOfferContext) {
+        pendingIncomingOfferContext = null;
+        pendingIncomingIceCandidates = [];
+    }
+    return;
+}
+
+if (incomingOfferContext && pendingIncomingOfferContext !== incomingOfferContext) {
     return;
 }
 
 if (callerAllowed !== true) {
+    if (pendingIncomingOfferContext === incomingOfferContext) {
+        pendingIncomingOfferContext = null;
+        pendingIncomingIceCandidates = [];
+    }
     console.warn("Incoming call denied: friendship or block permission was not verified.");
-    await rejectUnauthorizedIncomingCall(incomingPeerId, generation);
+    await rejectUnauthorizedIncomingCall(incomingPeerId, sessionId, generation);
     return;
 }
 
@@ -1654,11 +2131,20 @@ if (callerAllowed !== true) {
 
     if (
         peerConnection ||
-        currentCallUserId
+        currentCallSessionId ||
+        currentCallUserId ||
+        outgoingCallStartToken ||
+        (pendingIncomingOfferContext && pendingIncomingOfferContext !== incomingOfferContext)
     ) {
 
+        if (pendingIncomingOfferContext === incomingOfferContext) {
+            pendingIncomingOfferContext = null;
+            pendingIncomingIceCandidates = [];
+        }
+
         await rejectBusyIncomingCall(
-            signal.caller_id
+            signal.caller_id,
+            sessionId
         );
 
         return;
@@ -1671,6 +2157,18 @@ if (callerAllowed !== true) {
 
     currentCallRole =
         "receiver";
+    currentCallSessionId = sessionId;
+    currentCallPhase = "ringing";
+
+    if (
+        incomingOfferContext &&
+        pendingIncomingOfferContext === incomingOfferContext &&
+        incomingOfferContext.sessionId === sessionId
+    ) {
+        pendingIceCandidates.push(...pendingIncomingIceCandidates);
+        pendingIncomingIceCandidates = [];
+        pendingIncomingOfferContext = null;
+    }
 
 
     // --------------------------------------------------
@@ -1678,7 +2176,7 @@ if (callerAllowed !== true) {
     // --------------------------------------------------
 
     const incomingOffer =
-        signal.signal_data;
+        signalPayload;
 
     const isVideoCall =
         incomingOffer &&
@@ -1763,8 +2261,8 @@ if (callerAllowed !== true) {
     }
 
 
-    const callerName =
-        await getCallerName(
+    const callerProfile =
+        await getCallerProfile(
             signal.caller_id
         );
 
@@ -1772,7 +2270,8 @@ if (callerAllowed !== true) {
         generation !== callRealtimeGeneration ||
         !currentUser ||
         currentCallUserId !== incomingPeerId ||
-        currentCallRole !== "receiver"
+        currentCallRole !== "receiver" ||
+        !isCallSessionCurrent(sessionId, incomingPeerId)
     ) {
         return;
     }
@@ -1787,9 +2286,14 @@ if (callerAllowed !== true) {
     if (callerElement) {
 
         callerElement.textContent =
-            callerName;
+            callerProfile.name;
 
     }
+
+    setCallPeerPresentation(
+        callerProfile.name,
+        callerProfile.avatarUrl
+    );
 
 
     document
@@ -1800,6 +2304,7 @@ if (callerAllowed !== true) {
             "data-caller-id",
             signal.caller_id
         );
+    document.getElementById("acceptCallBtn")?.setAttribute("data-call-session-id", sessionId);
 
 
     document
@@ -1810,10 +2315,12 @@ if (callerAllowed !== true) {
             "data-caller-id",
             signal.caller_id
         );
+    document.getElementById("rejectCallBtn")?.setAttribute("data-call-session-id", sessionId);
 
 
     window.pendingCallOffer =
-        signal.signal_data;
+        incomingOffer;
+    window.pendingCallOfferSessionId = sessionId;
 
 
     showCallPanel(
@@ -1823,7 +2330,7 @@ if (callerAllowed !== true) {
 
     // Start 30-second ringing timer.
 
-    startCallRingTimer();
+    startCallRingTimer(sessionId);
 
 
     return;
@@ -1843,7 +2350,8 @@ if (
     if (
         !peerConnection ||
         currentCallRole !==
-            "caller"
+            "caller" ||
+        !isCallSessionCurrent(sessionId, signal.caller_id)
     ) {
 
         return;
@@ -1855,65 +2363,53 @@ if (
 
 
 const answeringConnection = peerConnection;
+startCallConnectionTimer(answeringConnection, generation, sessionId);
+currentCallPhase = "connecting";
 await answeringConnection
     .setRemoteDescription(
         new RTCSessionDescription(
-            signal.signal_data
+            signalPayload
         )
     );
 
 if (
     generation !== callRealtimeGeneration ||
     !currentUser ||
-    peerConnection !== answeringConnection
+    peerConnection !== answeringConnection ||
+    !isCallSessionCurrent(sessionId, signal.caller_id)
 ) {
     return;
 }
-
 
 // --------------------------------------------------
 // ADD QUEUED ICE CANDIDATES
 // --------------------------------------------------
 
-if (
-    pendingIceCandidates.length > 0
-) {
+if (pendingIceCandidates.length > 0) {
+    const queuedCandidates = pendingIceCandidates;
+    pendingIceCandidates = [];
 
     window.TalkSpaceLogger?.debug(
         "PROCESSING QUEUED ICE CANDIDATES:",
-        pendingIceCandidates.length
+        queuedCandidates.length
     );
 
-
-    for (
-        const candidate
-        of pendingIceCandidates
-    ) {
-
-        try {
-
-            await peerConnection
-                .addIceCandidate(
-                    new RTCIceCandidate(
-                        candidate
-                    )
-                );
-
-        } catch (error) {
-
-            console.error(
-                "QUEUED ICE CANDIDATE ERROR:",
-                error
-            );
-
+    for (const candidate of queuedCandidates) {
+        if (
+            peerConnection !== answeringConnection ||
+            !isCallSessionCurrent(sessionId, signal.caller_id)
+        ) {
+            return;
         }
 
+        try {
+            await answeringConnection.addIceCandidate(
+                new RTCIceCandidate(candidate)
+            );
+        } catch (error) {
+            console.error("QUEUED ICE CANDIDATE ERROR:", error);
+        }
     }
-
-
-    pendingIceCandidates =
-        [];
-
 }
 
 
@@ -1945,11 +2441,26 @@ if (
 ) {
 
     if (
+        !currentCallUserId &&
+        pendingIncomingOfferContext &&
+        pendingIncomingOfferContext.callerId === signal.caller_id &&
+        pendingIncomingOfferContext.receiverId === currentUser.id &&
+        pendingIncomingOfferContext.generation === generation &&
+        pendingIncomingOfferContext.sessionId === sessionId
+    ) {
+        pendingIncomingIceCandidates.push(signalPayload);
+        window.TalkSpaceLogger?.debug("Early incoming ICE candidate staged.");
+        return;
+    }
+
+    if (!isCallSessionCurrent(sessionId, signal.caller_id)) return;
+
+    if (
         !peerConnection
     ) {
 
         pendingIceCandidates.push(
-            signal.signal_data
+            signalPayload
         );
 
         return;
@@ -1966,7 +2477,7 @@ if (
     ) {
 
         pendingIceCandidates.push(
-            signal.signal_data
+            signalPayload
         );
 
         window.TalkSpaceLogger?.debug(
@@ -1980,14 +2491,21 @@ if (
 
     try {
 
-        await peerConnection
+        const candidateConnection = peerConnection;
+        if (!isCallSessionCurrent(sessionId, signal.caller_id)) return;
+        await candidateConnection
             .addIceCandidate(
                 new RTCIceCandidate(
-                    signal.signal_data
+                    signalPayload
                 )
             );
 
-            if (generation !== callRealtimeGeneration || !currentUser) {
+            if (
+                generation !== callRealtimeGeneration ||
+                !currentUser ||
+                peerConnection !== candidateConnection ||
+                !isCallSessionCurrent(sessionId, signal.caller_id)
+            ) {
                 return;
             }
 
@@ -2015,6 +2533,14 @@ if (
     "hangup"
 ) {
 
+    const matchesPendingIncomingCall =
+        pendingIncomingOfferContext?.sessionId === sessionId &&
+        pendingIncomingOfferContext.callerId === signal.caller_id &&
+        pendingIncomingOfferContext.receiverId === currentUser.id;
+    if (!isCallSessionCurrent(sessionId, signal.caller_id) && !matchesPendingIncomingCall) {
+        return;
+    }
+
     window.TalkSpaceLogger?.debug(
         "REMOTE HANGUP RECEIVED"
     );
@@ -2023,7 +2549,7 @@ if (
     clearCallRingTimer();
 
 
-    cleanupCall();
+    cleanupCall(sessionId);
 
 
     if (
@@ -2056,19 +2582,19 @@ window.TalkSpaceLogger?.debug("Call rejection signal received.");
 
 
     const wasBusy =
-        signal.signal_data &&
-        signal.signal_data.reason ===
+        signalPayload &&
+        signalPayload.reason ===
             "busy";
 
 
     const wasAcceptFailed =
-        signal.signal_data &&
-        signal.signal_data.reason ===
+        signalPayload &&
+        signalPayload.reason ===
             "accept_failed";
 
     const wasUnavailable =
-        signal.signal_data &&
-        signal.signal_data.reason ===
+        signalPayload &&
+        signalPayload.reason ===
             "unavailable";
 
 
@@ -2079,7 +2605,7 @@ window.TalkSpaceLogger?.debug("Call rejection signal received.");
     clearCallRingTimer();
 
 
-    cleanupCall();
+    cleanupCall(sessionId);
 
 
     if (
@@ -2157,7 +2683,7 @@ if (
     clearCallRingTimer();
 
 
-    cleanupCall();
+    cleanupCall(sessionId);
 
 
     if (
@@ -2184,10 +2710,10 @@ if (
 
 
 // ======================================================
-// GET CALLER NAME
+// GET CALLER PROFILE
 // ======================================================
 
-async function getCallerName(
+async function getCallerProfile(
     userId
 ) {
 
@@ -2198,7 +2724,7 @@ async function getCallerName(
         await client
             .from("profiles")
             .select(
-                "username, display_name"
+                "username, display_name, avatar_url"
             )
             .eq(
                 "id",
@@ -2212,16 +2738,18 @@ async function getCallerName(
         !data
     ) {
 
-        return "Someone";
+        return {
+            name: "Someone",
+            avatarUrl: ""
+        };
 
     }
 
 
-    return (
-        data.display_name ||
-        data.username ||
-        "Someone"
-    );
+    return {
+        name: data.display_name || data.username || "Someone",
+        avatarUrl: data.avatar_url || ""
+    };
 
 }
 
@@ -2231,7 +2759,16 @@ async function getCallerName(
 // ======================================================
 
 // Fully releases WebRTC, media, timers, pending ICE, UI, and local call state.
-function cleanupCall() {
+function cleanupCall(expectedSessionId = null) {
+
+    if (
+        expectedSessionId &&
+        currentCallSessionId !== expectedSessionId &&
+        outgoingCallStartToken?.sessionId !== expectedSessionId &&
+        pendingIncomingOfferContext?.sessionId !== expectedSessionId
+    ) {
+        return false;
+    }
 
     // --------------------------------------------------
     // STOP RING TIMER
@@ -2239,6 +2776,13 @@ function cleanupCall() {
 
     clearCallRingTimer();
     pendingIceCandidates = [];
+    pendingIncomingIceCandidates = [];
+    pendingIncomingOfferContext = null;
+    outgoingIceCandidates = [];
+    outgoingIceOfferReady = false;
+    outgoingIceWriteQueue = Promise.resolve();
+    clearCallConnectionTimer();
+    clearCallDisconnectedTimer();
 
 
     // --------------------------------------------------
@@ -2444,14 +2988,26 @@ function cleanupCall() {
     // RESET CALL STATE
     // --------------------------------------------------
 
+    resetMinimizedCallUi();
+
     currentCallUserId =
         null;
 
     currentCallRole =
         null;
 
+    currentCallSessionId = null;
+    currentCallPhase = null;
+    if (!expectedSessionId || outgoingCallStartToken?.sessionId === expectedSessionId) {
+        outgoingCallStartToken = null;
+    }
+    if (!expectedSessionId || acceptingCallSessionId === expectedSessionId) {
+        acceptingCallSessionId = null;
+    }
+
     window.pendingCallOffer =
         null;
+    window.pendingCallOfferSessionId = null;
 
 
     // --------------------------------------------------
@@ -2483,6 +3039,8 @@ function cleanupCall() {
         setMuteButtonPresentation(muteButton, false);
     }
 
+    return true;
+
 }
 
 
@@ -2502,8 +3060,9 @@ async function handleBlockedPeerCall(peerId) {
 
     const peerRole = currentCallRole;
     const actorId = currentUser.id;
+    const sessionId = currentCallSessionId;
     clearCallRingTimer();
-    cleanupCall();
+    if (!sessionId || !cleanupCall(sessionId)) return false;
 
     const signalType = peerRole === "receiver" ? "reject" : "hangup";
     try {
@@ -2513,9 +3072,9 @@ async function handleBlockedPeerCall(peerId) {
                 caller_id: actorId,
                 receiver_id: peerId,
                 signal_type: signalType,
-                signal_data: signalType === "reject"
+                signal_data: makeCallSignalData(sessionId, signalType === "reject"
                     ? { reason: "unavailable" }
-                    : null
+                    : null)
             });
         if (error) {
             console.error("BLOCKED CALL CLEANUP SIGNAL ERROR:", error);
@@ -2536,6 +3095,7 @@ async function hangUpCall() {
 
     const targetUserId =
         currentCallUserId;
+    const sessionId = currentCallSessionId;
 
 
     // --------------------------------------------------
@@ -2545,6 +3105,7 @@ async function hangUpCall() {
     try {
     if (
         targetUserId &&
+        sessionId &&
         currentUser
     ) {
 
@@ -2564,7 +3125,7 @@ async function hangUpCall() {
                         "hangup",
 
                     signal_data:
-                        null
+                        makeCallSignalData(sessionId, null)
                 });
 
 
@@ -2588,7 +3149,7 @@ async function hangUpCall() {
         console.error("HANGUP SIGNAL ERROR:", error);
     } finally {
         clearCallRingTimer();
-        cleanupCall();
+        cleanupCall(sessionId);
     }
 
 }
@@ -2732,8 +3293,15 @@ function startCallRealtime() {
 
                 }
 
-                // Offers establish a new incoming call. Every other call
-                // signal must belong to the peer already assigned to this call.
+                const signalData = readCallSignalData(signal);
+                if (!signalData) {
+                    window.TalkSpaceLogger?.debug("Ignoring call signal without a session ID.");
+                    return;
+                }
+                const { sessionId } = signalData;
+
+                // Offers establish an incoming call. Candidates may also
+                // arrive while that offer's existing permission checks run.
                 if (signal.signal_type !== "offer") {
                     const supportedTypes = [
                         "answer",
@@ -2743,10 +3311,27 @@ function startCallRealtime() {
                         "timeout"
                     ];
 
+                    const isActivePeerSignal =
+                        currentCallSessionId === sessionId &&
+                        currentCallUserId === signal.caller_id;
+                    const isEarlyCandidate =
+                        signal.signal_type === "candidate" &&
+                        pendingIncomingOfferContext &&
+                        pendingIncomingOfferContext.sessionId === sessionId &&
+                        pendingIncomingOfferContext.callerId === signal.caller_id &&
+                        pendingIncomingOfferContext.receiverId === currentUser.id &&
+                        pendingIncomingOfferContext.generation === generation;
+                    const isPendingCallEnd =
+                        ["hangup", "reject", "timeout"].includes(signal.signal_type) &&
+                        pendingIncomingOfferContext &&
+                        pendingIncomingOfferContext.sessionId === sessionId &&
+                        pendingIncomingOfferContext.callerId === signal.caller_id &&
+                        pendingIncomingOfferContext.receiverId === currentUser.id &&
+                        pendingIncomingOfferContext.generation === generation;
+
                     if (
                         !supportedTypes.includes(signal.signal_type) ||
-                        !currentCallUserId ||
-                        signal.caller_id !== currentCallUserId
+                        (!isActivePeerSignal && !isEarlyCandidate && !isPendingCallEnd)
                     ) {
                         window.TalkSpaceLogger?.debug("Ignoring unrelated call signal.", {
                             signalType: signal.signal_type
@@ -2756,10 +3341,7 @@ function startCallRealtime() {
                 }
 
 
-                await handleCallSignal(
-                    signal,
-                    generation
-                );
+                await handleCallSignal(signal, generation);
 
             }
         )
@@ -3061,11 +3643,13 @@ if (acceptCallButton) {
 
             const offer =
                 window.pendingCallOffer;
+            const sessionId = window.pendingCallOfferSessionId;
 
 
             if (
                 !callerId ||
-                !offer
+                !offer ||
+                !sessionId
             ) {
 
                 return;
@@ -3077,7 +3661,8 @@ if (acceptCallButton) {
 
                 await acceptIncomingCall(
                     callerId,
-                    offer
+                    offer,
+                    sessionId
                 );
 
             } catch (error) {
@@ -3088,7 +3673,7 @@ if (acceptCallButton) {
                 );
 
 
-                cleanupCall();
+                cleanupCall(sessionId);
 
 
                 if (
@@ -3136,12 +3721,16 @@ if (rejectCallButton) {
                     .dataset
                     .callerId ||
                 currentCallUserId;
+            const sessionId =
+                rejectCallButton.dataset.callSessionId ||
+                window.pendingCallOfferSessionId;
 
 
             try {
 
                 await rejectIncomingCall(
-                    callerId
+                    callerId,
+                    sessionId
                 );
 
             } catch (error) {
@@ -3200,6 +3789,66 @@ if (muteCallButton) {
         () => {
 
             toggleMute();
+
+        }
+    );
+
+}
+
+
+const minimizeIncomingCallButton =
+    document.getElementById(
+        "minimizeIncomingCallBtn"
+    );
+
+
+if (minimizeIncomingCallButton) {
+
+    minimizeIncomingCallButton.addEventListener(
+        "click",
+        () => {
+
+            minimizeCallUi();
+
+        }
+    );
+
+}
+
+
+const minimizeActiveCallButton =
+    document.getElementById(
+        "minimizeActiveCallBtn"
+    );
+
+
+if (minimizeActiveCallButton) {
+
+    minimizeActiveCallButton.addEventListener(
+        "click",
+        () => {
+
+            minimizeCallUi();
+
+        }
+    );
+
+}
+
+
+const minimizedCallBubble =
+    document.getElementById(
+        "minimizedCallBubble"
+    );
+
+
+if (minimizedCallBubble) {
+
+    minimizedCallBubble.addEventListener(
+        "click",
+        () => {
+
+            restoreMinimizedCallUi();
 
         }
     );

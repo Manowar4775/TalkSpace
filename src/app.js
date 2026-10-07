@@ -1137,6 +1137,9 @@ if (window.TalkSpaceSettings?.initialize) {
             currentProfile = { ...currentProfile, display_name: displayName };
             setAccountIdentity(currentProfile, currentUser);
             $("profileDisplayName").textContent = displayName || "-";
+        },
+        async () => {
+            await cleanupSignedOutState();
         }
     );
 }

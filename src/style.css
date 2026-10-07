@@ -2604,6 +2604,95 @@ textarea[aria-invalid="true"] {
     font-size: var(--text-lg);
 }
 
+.deleteAccountSection {
+    display: grid;
+    gap: 8px;
+    margin-top: 12px;
+    padding-top: 14px;
+    border-top: 1px solid var(--color-border);
+}
+
+.deleteAccountSection h2,
+.deleteAccountSection h3 {
+    margin: 0;
+    color: var(--color-danger);
+}
+
+.deleteAccountSection p {
+    margin: 0;
+    color: var(--color-muted);
+    line-height: 1.5;
+}
+
+.danger-button {
+    min-height: 44px;
+    border-color: transparent;
+    background: var(--color-danger-surface);
+    color: var(--color-text);
+}
+
+.danger-button:not(:disabled):hover {
+    background: var(--color-danger-hover);
+}
+
+.deleteAccountDialog {
+    width: min(460px, calc(100% - 32px));
+    max-width: none;
+    padding: 0;
+    border: 1px solid var(--color-border-subtle);
+    border-radius: 18px;
+    background: var(--color-surface);
+    color: var(--color-text);
+    box-shadow: var(--shadow-popover);
+}
+
+.deleteAccountDialog::backdrop {
+    background: rgba(0, 0, 0, 0.72);
+}
+
+.deleteAccountDialogContent {
+    display: grid;
+    gap: 12px;
+    padding: 22px;
+}
+
+.deleteAccountDialogContent h2 {
+    margin: 0;
+    color: var(--color-danger);
+}
+
+.deleteAccountDialogContent p {
+    margin: 0;
+    line-height: 1.5;
+}
+
+.deleteAccountDialogContent label {
+    font-weight: 700;
+}
+
+.deleteAccountDialogContent input {
+    min-height: 44px;
+}
+
+#deleteAccountStatus[data-kind="error"] {
+    color: var(--color-danger);
+}
+
+#deleteAccountStatus[data-kind="success"] {
+    color: var(--color-success);
+}
+
+.deleteAccountDialogActions {
+    display: flex;
+    justify-content: flex-end;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
+.deleteAccountDialogActions button {
+    min-height: 44px;
+}
+
 .settings-card > p:not(.subtitle, .settings-note, .settings-message) {
     margin: 0;
     color: var(--color-muted);
@@ -2901,6 +2990,104 @@ textarea[aria-invalid="true"] {
     background: var(--color-danger-surface);
 }
 
+.callActions .minimizeCallBtn {
+    border-color: var(--color-border);
+    background: var(--color-surface-raised);
+}
+
+.callActions .minimizeCallBtn:not(:disabled):hover {
+    border-color: var(--color-border-hover);
+    background: var(--color-surface-hover);
+}
+
+.minimizedCallBubble:not(.hidden) {
+    position: fixed;
+    z-index: 9999;
+    right: max(18px, env(safe-area-inset-right));
+    bottom: calc(96px + env(safe-area-inset-bottom));
+    display: grid;
+    grid-template-columns: auto minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 10px;
+    width: min(360px, calc(100vw - 36px));
+    min-height: 64px;
+    padding: 9px 12px 9px 9px;
+    border: 1px solid var(--color-border);
+    border-radius: var(--radius-card);
+    background: var(--color-surface-raised);
+    box-shadow: var(--shadow-popover);
+    color: var(--color-text);
+    text-align: left;
+}
+
+.minimizedCallBubble:not(.hidden):hover {
+    border-color: var(--color-border-hover);
+    background: var(--color-surface-hover);
+}
+
+.minimizedCallBubble:focus-visible {
+    outline: 3px solid var(--color-focus);
+    outline-offset: 3px;
+}
+
+.minimizedCallBubble[data-call-state="ringing"] {
+    border-color: var(--color-warning);
+}
+
+.minimizedCallAvatar {
+    display: grid;
+    place-items: center;
+    width: 44px;
+    height: 44px;
+    overflow: hidden;
+    border-radius: 50%;
+    background: var(--color-primary);
+    color: var(--color-text);
+    font-weight: 750;
+}
+
+.minimizedCallAvatar img {
+    width: 100%;
+    height: 100%;
+    object-fit: cover;
+}
+
+.minimizedCallDetails {
+    display: grid;
+    min-width: 0;
+    gap: 2px;
+}
+
+.minimizedCallDetails strong,
+.minimizedCallDetails span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.minimizedCallDetails strong {
+    font-size: var(--text-sm);
+}
+
+#minimizedCallStatus,
+#minimizedCallDuration {
+    color: var(--color-muted);
+    font-size: 12px;
+    line-height: 1.2;
+}
+
+#minimizedCallDuration:not(.hidden) {
+    color: var(--color-text);
+    font-variant-numeric: tabular-nums;
+}
+
+.minimizedCallRestore {
+    color: var(--color-primary);
+    font-size: 12px;
+    font-weight: 700;
+    white-space: nowrap;
+}
+
 .callActions #hangupCallBtn:not(:disabled):hover,
 .callActions #rejectCallBtn:not(:disabled):hover {
     background: var(--color-danger-hover);
@@ -2976,6 +3163,21 @@ textarea[aria-invalid="true"] {
         width: 100%;
         min-height: 52px;
         padding: 12px 8px;
+    }
+
+    .callActions .minimizeCallBtn {
+        grid-column: 1 / -1;
+    }
+
+    .minimizedCallBubble:not(.hidden) {
+        right: max(12px, env(safe-area-inset-right));
+        bottom: calc(88px + env(safe-area-inset-bottom));
+        width: min(360px, calc(100vw - 24px));
+        min-height: 58px;
+    }
+
+    .minimizedCallRestore {
+        display: none;
     }
 
     #callNotification:not(.hidden) {

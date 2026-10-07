@@ -59,6 +59,26 @@
         Do not share your password or OTP with anyone.
     </p>
 
+    <section class="deleteAccountSection" aria-labelledby="deleteAccountSectionTitle">
+        <h2 id="deleteAccountSectionTitle">Delete Account</h2>
+        <p>This permanently deletes your TalkSpace account and associated data.</p>
+        <button id="deleteAccountButton" class="danger-button" type="button">Delete Account</button>
+    </section>
+
+    <dialog id="deleteAccountDialog" class="deleteAccountDialog" aria-labelledby="deleteAccountTitle" aria-describedby="deleteAccountWarning">
+        <form method="dialog" class="deleteAccountDialogContent">
+            <h2 id="deleteAccountTitle">Permanently delete your account?</h2>
+            <p id="deleteAccountWarning">This action cannot be undone. Your TalkSpace account and associated data will be permanently removed. You can sign up again later, but it will be a new account.</p>
+            <label for="deleteAccountConfirmation">Type DELETE to confirm</label>
+            <input id="deleteAccountConfirmation" type="text" autocomplete="off" autocapitalize="off" spellcheck="false">
+            <p id="deleteAccountStatus" role="status" aria-live="polite"></p>
+            <div class="deleteAccountDialogActions">
+                <button id="cancelDeleteAccountButton" class="secondary-button" type="button">Cancel</button>
+                <button id="confirmDeleteAccountButton" class="danger-button" type="button" disabled>Delete my account</button>
+            </div>
+        </form>
+    </dialog>
+
     <p>
         <a class="settings-privacy-link" href="./privacy.html">Privacy &amp; safety</a>
     </p>

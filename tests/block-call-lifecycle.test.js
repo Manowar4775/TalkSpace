@@ -50,26 +50,26 @@ test("block and unblock broadcast carries both participants for peer-side revali
 
 test("denied incoming offers are rejected promptly without clearing an unrelated call", () => {
     const deniedOffer = sourceBetween(call, "if (callerAllowed !== true)", "// Already on another call.");
-    assert.match(deniedOffer, /await rejectUnauthorizedIncomingCall\(incomingPeerId, generation\)/);
+    assert.match(deniedOffer, /await rejectUnauthorizedIncomingCall\(incomingPeerId, sessionId, generation\)/);
 
     const rejection = sourceBetween(call, "async function rejectUnauthorizedIncomingCall(", "// ======================================================\n// REJECT INCOMING CALL BECAUSE USER IS BUSY");
     assert.match(rejection, /signal_type: "reject"/);
     assert.match(rejection, /reason: "unavailable"/);
     assert.match(rejection, /currentCallUserId === callerId/);
     assert.match(rejection, /currentCallRole === "receiver"/);
-    assert.match(rejection, /cleanupCall\(\)/);
+    assert.match(rejection, /cleanupCall\(sessionId\)/);
 });
 
 test("block detection immediately cleans matching active calls and notifies the peer", () => {
     const handler = sourceBetween(call, "async function handleBlockedPeerCall(", "// Sends a best-effort hangup");
     assert.match(handler, /currentCallUserId !== peerId/);
-    assert.match(handler, /cleanupCall\(\)/);
+    assert.match(handler, /cleanupCall\(sessionId\)/);
     assert.match(handler, /signalType = peerRole === "receiver" \? "reject" : "hangup"/);
 
     const rejection = sourceBetween(call, 'if (\n    signal.signal_type ===\n    "reject"\n)', "// NO ANSWER / TIMEOUT");
     assert.match(rejection, /wasUnavailable/);
     assert.match(rejection, /privacy or friendship requirements were not met/);
-    assert.match(rejection, /cleanupCall\(\)/);
+    assert.match(rejection, /cleanupCall\(sessionId\)/);
 });
 
 test("message and call permission guards continue to fail closed", () => {

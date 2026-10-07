@@ -6,3 +6,6 @@
 .env
 .env.*
 !.env.example
+
+# Supabase CLI project-local cache and linkage metadata
+supabase/.temp/
