@@ -1,0 +1,74 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>TalkSpace Settings</title>
+
+    <link rel="stylesheet" href="src/style.css">
+
+</head>
+
+<body class="settings-page">
+
+<main class="card settings-card">
+
+    <h1>Settings</h1>
+
+    <p class="subtitle">Update the profile information supported by TalkSpace.</p>
+
+    <label class="settings-field-label" for="displayName">Display name</label>
+    <input
+        id="displayName"
+        type="text"
+        maxlength="80"
+        autocomplete="name"
+        placeholder="Display name"
+    >
+
+    <label for="bio">Bio</label>
+    <textarea id="bio" disabled aria-describedby="bioNote" placeholder="Bio is not currently supported"></textarea>
+    <p id="bioNote" class="settings-note">Bio is not stored by the current TalkSpace profile database, so it cannot be saved yet.</p>
+
+    <p id="settingsMessage" class="settings-message" role="status" aria-live="polite"></p>
+
+    <button id="saveBtn" type="button" disabled>
+        Save Changes
+    </button>
+
+    <button id="backBtn" type="button" class="secondary-button">
+        Back
+    </button>
+
+    <hr>
+
+    <h2>Account</h2>
+
+    <p>
+        Your account is protected by Supabase Authentication.
+    </p>
+
+    <p>
+        Do not share your password or OTP with anyone.
+    </p>
+
+    <p>
+        <a class="settings-privacy-link" href="./privacy.html">Privacy &amp; safety</a>
+    </p>
+
+</main>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2"></script>
+<script src="./src/config.js"></script>
+<script src="./src/settings.js"></script>
+
+</body>
+
+</html>

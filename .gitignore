@@ -1,0 +1,8 @@
+# Local/editor
+.vscode/
+.DS_Store
+
+# Secrets
+.env
+.env.*
+!.env.example

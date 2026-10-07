@@ -1,0 +1,982 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+
+    <meta charset="UTF-8">
+
+    <meta
+        name="viewport"
+        content="width=device-width, initial-scale=1.0"
+    >
+
+    <title>TalkSpace</title>
+
+    <link
+        rel="stylesheet"
+        href="./src/style.css"
+    >
+
+    <link
+        rel="manifest"
+        href="./manifest.json"
+    >
+
+    <meta
+        name="theme-color"
+        content="#07110d"
+    >
+
+    <!--
+        Cloudflare Turnstile
+
+        Explicit rendering is being used because
+        the signup/login sections are dynamically
+        shown and hidden.
+    -->
+    <script
+        src="https://challenges.cloudflare.com/turnstile/v0/api.js?render=explicit"
+        defer>
+    </script>
+
+</head>
+
+
+<body>
+
+<div id="app">
+
+
+    <!-- ==================================================
+         AUTH SCREEN
+    =================================================== -->
+
+    <section
+        id="authScreen"
+        class="screen"
+    >
+
+        <div class="card">
+
+            <h1>TalkSpace</h1>
+
+            <p class="subtitle">
+                Connect. Talk. Stay private.
+            </p>
+
+
+            <!-- ==================================================
+                 INITIAL AUTH CHOICE
+            =================================================== -->
+
+            <div id="authChoice">
+
+                <button id="showSignupBtn">
+                    Create Account
+                </button>
+
+                <button id="showLoginBtn">
+                    Sign In / Login
+                </button>
+
+            </div>
+
+
+            <!-- ==================================================
+                 CREATE ACCOUNT
+            =================================================== -->
+
+            <div
+                id="signupBox"
+                class="hidden"
+            >
+
+                <h2>Create Account</h2>
+
+
+                <!-- EMAIL -->
+
+                <input
+                    id="signupEmail"
+                    type="email"
+                    placeholder="Email"
+                    autocomplete="email"
+                >
+
+
+                <!--
+                    Signup Turnstile is rendered
+                    here by JavaScript.
+                -->
+
+                <div
+                    id="turnstileWidget"
+                ></div>
+
+
+                <button id="sendOtpBtn">
+                    Send OTP
+                </button>
+
+
+                <!-- ==================================================
+                     OTP
+                =================================================== -->
+
+                <div
+                    id="otpBox"
+                    class="hidden"
+                >
+
+                    <input
+                        id="otpInput"
+                        type="text"
+                        inputmode="numeric"
+                        autocomplete="one-time-code"
+                        maxlength="8"
+                        minlength="8"
+                        placeholder="8-digit OTP"
+                    >
+
+
+                    <button id="resendOtpBtn" type="button" disabled>
+                        Resend OTP
+                    </button>
+
+
+                    <button id="verifyOtpBtn">
+                        Verify OTP
+                    </button>
+
+                </div>
+
+
+                <!-- ==================================================
+                     PROFILE CREATION
+                =================================================== -->
+
+                <div
+                    id="profileBox"
+                    class="hidden"
+                >
+
+                    <input
+                        id="usernameInput"
+                        type="text"
+                        placeholder="Username"
+                        autocomplete="username"
+                    >
+
+
+                    <input
+                        id="displayNameInput"
+                        type="text"
+                        placeholder="Display name"
+                        autocomplete="name"
+                    >
+
+
+                    <input
+                        id="passwordInput"
+                        type="password"
+                        placeholder="Password (12+ characters)"
+                        autocomplete="new-password"
+                    >
+
+
+                    <button id="createAccountBtn">
+                        Create Account
+                    </button>
+
+                </div>
+
+
+                <button
+                    id="backToAuthBtn"
+                    type="button"
+                >
+                    Back
+                </button>
+
+            </div>
+
+
+            <!-- ==================================================
+                 LOGIN
+            =================================================== -->
+
+            <div
+                id="loginBox"
+                class="hidden"
+            >
+
+                <h2>Sign In</h2>
+
+
+                <input
+                    id="loginIdentifier"
+                    type="email"
+                    placeholder="Email"
+                    autocomplete="email"
+                >
+
+
+                <input
+                    id="loginPassword"
+                    type="password"
+                    placeholder="Password"
+                    autocomplete="current-password"
+                >
+
+
+                <!--
+                    Separate CAPTCHA for LOGIN.
+                -->
+
+                <div
+                    id="loginTurnstileWidget"
+                ></div>
+
+
+                <button id="loginBtn">
+                    Sign In
+                </button>
+
+
+                <button
+                    id="backToAuthFromLoginBtn"
+                    type="button"
+                >
+                    Back
+                </button>
+
+            </div>
+
+
+            <!-- AUTH MESSAGE -->
+
+            <p id="authMessage" aria-live="polite"></p>
+
+            <button
+                id="retryProfileLoadBtn"
+                type="button"
+                class="hidden"
+                aria-label="Retry loading your profile"
+            >
+                Retry
+            </button>
+
+        </div>
+
+    </section>
+
+
+
+    <!-- ==================================================
+         MAIN TALKSPACE SCREEN
+    =================================================== -->
+
+    <section
+        id="mainScreen"
+        class="screen hidden"
+    >
+
+        <!-- TOP BAR -->
+
+        <header class="topbar">
+            <div>
+                <strong>TalkSpace</strong>
+                <span id="onlineStatus">Offline</span>
+            </div>
+
+            <div class="accountMenu" id="accountMenu">
+                <button
+                    id="accountBtn"
+                    class="accountButton"
+                    type="button"
+                    aria-label="Account"
+                    aria-haspopup="true"
+                    aria-controls="accountPopover"
+                    aria-expanded="false"
+                >
+                    <span id="accountAvatar" aria-hidden="true">?</span>
+                </button>
+                <div id="accountPopover" class="accountPopover hidden" role="group" aria-label="Account options">
+                    <button id="profileBtn" type="button">Profile</button>
+                    <button id="settingsBtn" type="button">Settings</button>
+                    <button id="privacyBtn" type="button">Privacy &amp; Safety</button>
+                </div>
+            </div>
+        </header>
+
+
+        <!-- MAIN LAYOUT -->
+
+        <main class="layout">
+
+
+            <!-- ==================================================
+                 SIDEBAR
+            =================================================== -->
+
+            <aside class="sidebar" aria-label="TalkSpace navigation">
+                <nav class="sidebarNavigation" aria-label="TalkSpace views">
+                    <section class="sidebarNavGroup">
+                        <button id="homeBtn" type="button" aria-current="page">
+                            <svg class="navIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><path d="m3.5 10 8.5-7 8.5 7v10.5h-6v-6h-5v6h-6z" /></svg>
+                            <span>Home</span>
+                        </button>
+                        <button id="findPeopleBtn" type="button">
+                            <svg class="navIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.8" cy="10.8" r="6.3" /><path d="m15.5 15.5 5 5" /></svg>
+                            <span>Find People</span>
+                        </button>
+                    </section>
+                    <section class="sidebarNavGroup" aria-labelledby="relationshipsTitle">
+                        <h3 id="relationshipsTitle">Relationships</h3>
+                        <button id="friendsBtn" type="button">
+                            <svg class="navIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3" /><path d="M3 20v-1.5A4.5 4.5 0 0 1 7.5 14h3a4.5 4.5 0 0 1 4.5 4.5V20M16 5.5a3 3 0 0 1 0 5.8M17 14h.5a3.5 3.5 0 0 1 3.5 3.5V20" /></svg>
+                            <span>Friends</span>
+                        </button>
+                        <button id="requestsBtn" type="button">
+                            <svg class="navIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3" /><path d="M3 20v-1.5A4.5 4.5 0 0 1 7.5 14h3a4.5 4.5 0 0 1 4.5 4.5V20M18 7v6m-3-3h6" /></svg>
+                            <span>Friend Requests</span>
+                        </button>
+                        <button id="blockedBtn" type="button">
+                            <svg class="navIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9" /><path d="m5.7 5.7 12.6 12.6" /></svg>
+                            <span>Blocked Users</span>
+                        </button>
+                    </section>
+
+                </nav>
+            </aside>
+
+
+
+            <!-- ==================================================
+                 CHAT AREA
+            =================================================== -->
+
+            <section class="chatArea">
+
+
+                <!-- EMPTY CHAT -->
+
+                <div
+                    id="emptyChat"
+                    class="emptyState"
+                >
+                    <div class="homeDashboardContent">
+                        <span class="emptyStateMark" aria-hidden="true">T</span>
+                        <p class="homeEyebrow">YOUR SPACE TO CONNECT</p>
+                        <h2>Welcome to TalkSpace</h2>
+                        <p class="homeSubtitle">Find someone new, catch up with a friend, or manage your connections.</p>
+                        <nav class="homeQuickActions" aria-label="Quick access">
+                            <button class="homeQuickAction is-primary" type="button" data-home-nav="findPeople">
+                                <svg class="navIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="10.8" cy="10.8" r="6.3" /><path d="m15.5 15.5 5 5" /></svg><span>Find People</span>
+                            </button>
+                            <button class="homeQuickAction" type="button" data-home-nav="friends">
+                                <svg class="navIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3" /><path d="M3 20v-1.5A4.5 4.5 0 0 1 7.5 14h3a4.5 4.5 0 0 1 4.5 4.5V20M16 5.5a3 3 0 0 1 0 5.8M17 14h.5a3.5 3.5 0 0 1 3.5 3.5V20" /></svg><span>Friends</span>
+                            </button>
+                            <button class="homeQuickAction" type="button" data-home-nav="requests">
+                                <svg class="navIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="9" cy="8" r="3" /><path d="M3 20v-1.5A4.5 4.5 0 0 1 7.5 14h3a4.5 4.5 0 0 1 4.5 4.5V20M18 7v6m-3-3h6" /></svg><span>Friend Requests</span>
+                            </button>
+                            <button class="homeQuickAction" type="button" data-home-nav="blocked">
+                                <svg class="navIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false"><circle cx="12" cy="12" r="9" /><path d="m5.7 5.7 12.6 12.6" /></svg><span>Blocked Users</span>
+                            </button>
+                        </nav>
+                    </div>
+
+                </div>
+
+
+
+                <!-- CHAT PANEL -->
+                
+                <div id="findPeoplePanel" class="panel hidden">
+                    <div class="peoplePanelHeader">
+                        <button id="findPeopleBackBtn" type="button" aria-label="Back from Find People">← Back</button>
+                        <h2>Find People</h2>
+                    </div>
+                    <section class="findPeopleContent" aria-label="Search results">
+                        <label class="sidebarSearchLabel" for="searchInput">Find people by username</label>
+                        <input id="searchInput" type="text" placeholder="Search username..." autocomplete="off">
+                        <div id="userResults">
+                            <p class="listFeedback" role="status">Search by username to find people.</p>
+                        </div>
+                    </section>
+                </div>
+
+                <div id="profilePanel" class="panel hidden">
+                    <div class="peoplePanelHeader">
+                        <button id="closeProfileBtn" type="button" aria-label="Back from Profile">← Back</button>
+                        <h2>My Profile</h2>
+                    </div>
+
+                   <div class="profile-card">
+                       <p><strong>Username:</strong> <span id="profileUsername">-</span></p>
+                       <p><strong>Display Name:</strong> <span id="profileDisplayName">-</span></p>
+                       <p><strong>Email:</strong> <span id="profileEmail">-</span></p>
+                       <p><strong>Status:</strong> <span id="profileStatus">-</span></p>
+                   </div>
+
+                </div>
+
+                <section id="publicProfilePanel" class="panel hidden" aria-labelledby="publicProfileTitle">
+                    <div class="peoplePanelHeader">
+                        <button id="publicProfileBackBtn" type="button" aria-label="Back from profile">← Back</button>
+                        <h2 id="publicProfileTitle">Profile</h2>
+                    </div>
+                    <div class="publicProfileContent">
+                        <div id="publicProfileMessage" class="publicProfileMessage" role="status" aria-live="polite">Loading profile…</div>
+                        <div id="publicProfileDetails" class="publicProfileDetails hidden">
+                            <div id="publicProfileAvatar" class="profileAvatar publicProfileAvatar" aria-hidden="true"></div>
+                            <h3 id="publicProfileDisplayName"></h3>
+                            <p id="publicProfileUsername" class="personUsername"></p>
+                            <p id="publicProfileRelationship" class="publicProfileMeta"></p>
+                            <p id="publicProfilePresence" class="publicProfileMeta hidden"></p>
+                        </div>
+                    </div>
+                </section>
+
+                <div id="friendRequestsPanel" class="panel hidden">
+                    <div class="peoplePanelHeader">
+                        <button
+                            id="closeFriendRequestsBtn"
+                            type="button"
+                            aria-label="Back from Friend Requests"
+                        >
+                            ← Back
+                        </button>
+                        <h2 id="friendRequestsHeading">Friend Requests</h2>
+                    </div>
+
+                    <div id="friendRequestsList">
+                      <p>No friend requests yet.</p>
+                    </div>
+                </div>
+
+                <section id="settingsPanel" class="panel hidden" aria-labelledby="settingsTitle">
+                    <div class="peoplePanelHeader">
+                        <button id="settingsBackBtn" type="button" aria-label="Back from Settings">← Back</button>
+                        <h2 id="settingsTitle">Settings</h2>
+                    </div>
+                    <div class="settingsPanelContent">
+                        <p class="subtitle">Update the profile information supported by TalkSpace.</p>
+                        <label class="settings-field-label" for="displayName">Display name</label>
+                        <input id="displayName" type="text" maxlength="80" autocomplete="name" placeholder="Display name">
+                        <label for="bio">Bio</label>
+                        <textarea id="bio" disabled aria-describedby="bioNote" placeholder="Bio is not currently supported"></textarea>
+                        <p id="bioNote" class="settings-note">Bio is not stored by the current TalkSpace profile database, so it cannot be saved yet.</p>
+                        <p id="settingsMessage" class="settings-message" role="status" aria-live="polite"></p>
+                        <button id="saveBtn" type="button" disabled>Save Changes</button>
+                        <hr>
+                        <h3>Account</h3>
+                        <p>Your account is protected by Supabase Authentication.</p>
+                        <p>Do not share your password or OTP with anyone.</p>
+                    </div>
+                </section>
+
+                <section id="privacyPanel" class="panel hidden" aria-labelledby="privacyTitle">
+                    <div class="peoplePanelHeader">
+                        <button id="privacyBackBtn" type="button" aria-label="Back from Privacy and Safety">← Back</button>
+                        <h2 id="privacyTitle">Privacy &amp; safety</h2>
+                    </div>
+                    <div class="privacyPanelContent">
+                        <p class="subtitle">How privacy currently works in the app.</p>
+                        <p class="privacy-intro">This page describes protections and controls that are currently implemented. It does not add privacy settings that the app cannot enforce.</p>
+                        <section class="privacy-section"><h3>Private communication</h3><ul><li>Private chats and voice or video calls are available only between accepted friends.</li><li>If either person has blocked the other, messaging and calls are unavailable.</li><li>If TalkSpace cannot verify friendship or block status, it denies access instead of assuming it is allowed.</li></ul></section>
+                        <section class="privacy-section"><h3>When a friend is offline</h3><p>A friend's private chat history and last-message preview are hidden while they are offline. The message composer is unavailable, and calls cannot be started. Live updates use the same access checks; an older in-progress request must not reveal chat content after the state changes.</p></section>
+                        <section class="privacy-section"><h3>Information used to provide TalkSpace</h3><p>TalkSpace uses Supabase Authentication for account access. The app also stores profile details (username, display name, and avatar URL), friend-request and block records, online presence, messages and their delivery or seen state, and call-signalling data needed for communication. These features use the configured Supabase services for authentication, database storage, and realtime updates.</p></section>
+                        <section class="privacy-section"><h3>Controls available in the app</h3><ul><li>Block or unblock a person from the TalkSpace app. A block prevents private communication in either direction.</li><li>Use the chat's message controls to delete a message for yourself, delete it for everyone where available, or clear your chat view.</li><li>Manage your supported profile display name in Settings.</li></ul></section>
+                        <section class="privacy-section"><h3>Preferences not currently available</h3><p>TalkSpace does not currently provide user-configurable controls for online visibility, profile-field visibility, or a profile bio. Those options are not presented as active settings because the current application does not support saving or enforcing them.</p></section>
+                    </div>
+                </section>
+
+              <div
+    id="chatPanel"
+    class="hidden"
+>
+
+<!-- ======================================================
+     MESSAGE SELECTION BAR
+     ====================================================== -->
+
+<div
+    id="messageSelectionBar"
+    class="messageSelectionBar hidden"
+>
+
+    <button
+        id="cancelMessageSelection"
+        type="button"
+    >
+        ✕
+    </button>
+
+    <strong id="selectedMessageCount">
+        0 selected
+    </strong>
+
+    <button
+        id="copySelectedMessages"
+        type="button"
+    >
+        Copy
+    </button>
+
+    <button
+        id="deleteSelectedMessages"
+        type="button"
+    >
+        Delete for Me
+    </button>
+
+</div>
+
+
+    <!-- CHAT HEADER -->
+
+    <div class="chatHeader">
+
+        <button
+            id="mobileBackToFriendsBtn"
+            class="mobileBackButton"
+            type="button"
+            aria-label="Back to friends"
+        >
+            ← Friends
+        </button>
+
+        <div>
+
+            <strong id="chatUserName">
+                User
+            </strong>
+
+            <div class="chatIdentityStatus">
+                <span id="chatUserStatus">
+                    Offline
+                </span>
+
+                <span
+                    id="blockedUserIndicator"
+                    class="hidden"
+                    role="status"
+                    aria-label="You have been blocked by this user"
+                    title="You have been blocked by this user"
+                >
+                    Blocked
+                </span>
+            </div>
+
+        </div>
+
+
+        <button
+            id="friendRequestBtn"
+            type="button"
+            class="hidden"
+            data-action="unavailable"
+            aria-label="Send Friend Request"
+            title="Send Friend Request"
+        >
+            <svg class="friendRequestIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                <circle cx="9" cy="7" r="3.25" />
+                <path d="M3.5 19v-1.4A4.6 4.6 0 0 1 8.1 13h1.8a4.6 4.6 0 0 1 4.6 4.6V19" />
+                <path class="friendRequestPlus" d="M18 7v6m-3-3h6" />
+                <path class="friendRequestMinus" d="M15 10h6" />
+            </svg>
+            <span class="friendRequestButtonLabel">Send Friend Request</span>
+        </button>
+
+        <div>
+
+            <div id="chatManagementActions">
+                <button id="blockBtn">
+                    Block
+                </button>
+            </div>
+
+            <button id="callBtn" type="button" aria-label="Voice Call" title="Voice Call">
+                <svg class="chatCallButtonIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <path d="M6.6 3.8h2.7l1.3 4.1-1.7 1.3a14.1 14.1 0 0 0 5.9 5.9l1.3-1.7 4.1 1.3v2.7c0 .8-.6 1.4-1.4 1.4A15.4 15.4 0 0 1 5.2 5.2c0-.8.6-1.4 1.4-1.4Z" />
+                </svg>
+                <span class="chatCallButtonLabel">Voice Call</span>
+            </button>
+
+            <button
+                id="videoCallBtn"
+                type="button"
+                aria-label="Video Call"
+                title="Video Call"
+            >
+                <svg class="chatCallButtonIcon" viewBox="0 0 24 24" aria-hidden="true" focusable="false">
+                    <rect x="3" y="6" width="12" height="12" rx="2" />
+                    <path d="m15 10 6-3v10l-6-3" />
+                </svg>
+                <span class="chatCallButtonLabel">Video Call</span>
+            </button>
+
+            <button
+    id="chatMoreBtn"
+    type="button"
+    aria-label="More chat actions"
+    aria-haspopup="true"
+    aria-controls="chatMoreMenu"
+    aria-expanded="false"
+>
+    ⋮
+</button>
+
+        </div>
+
+    </div>
+    <!-- ======================================================
+     CHAT MORE MENU
+     ====================================================== -->
+
+<div
+    id="chatMoreMenu"
+    class="messageContextMenu hidden"
+    aria-label="Chat actions"
+>
+
+    <button
+        id="clearChatBtn"
+        type="button"
+    >
+        Clear Chat
+    </button>
+
+</div>
+
+<p id="typingIndicator" class="hidden" role="status">
+    Typing...
+</p>
+
+
+    <!-- MESSAGES -->
+
+    <div id="messages"></div>
+
+
+    <!-- MESSAGE INPUT -->
+
+    <div class="messageBox">
+
+        <input
+            id="messageInput"
+            type="text"
+            placeholder="Write a message..."
+            autocomplete="off"
+        >
+
+        <button id="sendMessageBtn">
+            Send
+        </button>
+
+    </div>
+
+</div>
+
+
+<!-- ======================================================
+     GLOBAL INCOMING CALL PANEL
+     ====================================================== -->
+
+<div
+    id="incomingCallPanel"
+    class="callPanel hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="incomingCallTitle"
+    aria-describedby="incomingCallDescription"
+>
+
+    <div class="callPanelContent">
+
+        <div class="callIcon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path d="M6.6 3.8 9.1 3a1.5 1.5 0 0 1 1.8.8l1.2 2.8a1.5 1.5 0 0 1-.4 1.7L10 9.8a14 14 0 0 0 4.2 4.2l1.5-1.7a1.5 1.5 0 0 1 1.7-.4l2.8 1.2a1.5 1.5 0 0 1 .8 1.8l-.8 2.5a2 2 0 0 1-2 1.4A16.2 16.2 0 0 1 4.9 5.8a2 2 0 0 1 1.7-2Z" />
+            </svg>
+        </div>
+
+        <h2 id="incomingCallTitle">
+            Incoming Voice Call
+        </h2>
+
+        <p id="incomingCallDescription">
+            <strong id="incomingCallerName">
+                Someone
+            </strong>
+            is calling you.
+        </p>
+
+        <div class="callActions">
+
+            <button
+                id="acceptCallBtn"
+                type="button"
+            >
+                Accept
+            </button>
+
+            <button
+                id="rejectCallBtn"
+                type="button"
+            >
+                Reject
+            </button>
+
+        </div>
+
+    </div>
+
+</div>
+
+
+<!-- ======================================================
+     GLOBAL ACTIVE CALL PANEL
+     ====================================================== -->
+
+<div
+    id="activeCallPanel"
+    class="callPanel hidden"
+    role="dialog"
+    aria-modal="true"
+    aria-labelledby="activeCallPeerName"
+    aria-describedby="callStatus"
+>
+
+    <div class="callPanelContent">
+
+        <div class="callIcon" aria-hidden="true">
+            <svg viewBox="0 0 24 24" focusable="false" aria-hidden="true">
+                <path d="M6.6 3.8 9.1 3a1.5 1.5 0 0 1 1.8.8l1.2 2.8a1.5 1.5 0 0 1-.4 1.7L10 9.8a14 14 0 0 0 4.2 4.2l1.5-1.7a1.5 1.5 0 0 1 1.7-.4l2.8 1.2a1.5 1.5 0 0 1 .8 1.8l-.8 2.5a2 2 0 0 1-2 1.4A16.2 16.2 0 0 1 4.9 5.8a2 2 0 0 1 1.7-2Z" />
+            </svg>
+        </div>
+
+        <h2 id="activeCallPeerName" class="callPeerName">Voice Call</h2>
+
+        <p id="activeCallTitle" class="callTypeLabel">Voice call</p>
+
+        <p id="callStatus" aria-live="polite">
+            Calling...
+        </p>
+
+        <p id="callDuration" class="callDuration hidden" aria-live="off">00:00</p>
+
+        <div class="callActions">
+
+            <button
+                id="muteCallBtn"
+                type="button"
+                aria-pressed="false"
+                data-muted="false"
+            >
+                Microphone on · Mute
+            </button>
+
+            <button
+                id="hangupCallBtn"
+                type="button"
+            >
+                Hang Up
+            </button>
+
+        </div>
+
+<!-- VIDEO CALL AREA -->
+
+<div
+    id="videoCallArea"
+    class="videoCallArea hidden"
+>
+
+    <video
+        id="remoteVideo"
+        autoplay
+        playsinline>
+    </video>
+
+    <video
+        id="localVideo"
+        autoplay
+        muted
+        playsinline>
+    </video>
+
+</div>
+
+<audio
+    id="remoteAudio"
+    autoplay>
+</audio>
+
+    </div>
+
+</div>
+
+            </section>
+
+        </main>
+
+        <button id="logoutBtn" class="dashboardLogout" type="button" aria-label="Log out of TalkSpace" title="Logout">Logout</button>
+
+    </section>
+
+    <div
+    id="callNotification"
+    class="hidden"
+    role="status"
+    aria-live="polite"
+>
+</div>
+
+</div>
+
+
+
+<!-- ==================================================
+     SUPABASE
+=================================================== -->
+
+<script
+    src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2">
+</script>
+
+
+<!-- ==================================================
+     YOUR SUPABASE CONFIG
+=================================================== -->
+
+<script src="./src/config.js"></script>
+<!-- ======================================================
+     MESSAGE CONTEXT MENU
+     ====================================================== -->
+
+<div
+    id="messageContextMenu"
+    class="messageContextMenu hidden"
+>
+
+    <button
+        id="contextCopyMessage"
+        type="button"
+    >
+        Copy
+    </button>
+
+    <button
+      id="contextSelectMessage"
+      type="button"
+>
+       Select
+    </button>
+
+
+    <button
+        id="contextEditMessage"
+        type="button"
+    >
+        Edit
+    </button>
+
+    <button
+        id="contextDeleteForMe"
+        type="button"
+    >
+        Delete for Me
+    </button>
+
+    <button
+        id="contextDeleteForEveryone"
+        type="button"
+    >
+        Delete for Everyone
+    </button>
+
+</div>
+
+<!-- ==================================================
+     MAIN APPLICATION
+=================================================== -->
+
+<script src="./src/friend-request-lifecycle.js"></script>
+<script src="./src/logger.js"></script>
+<script src="./src/turnstile-lifecycle.js"></script>
+<script src="./src/settings.js"></script>
+<script src="./src/app.js"></script>
+<script src="./src/call.js"></script>
+
+
+<!-- ==================================================
+     SERVICE WORKER
+=================================================== -->
+
+<script>
+
+if ("serviceWorker" in navigator) {
+
+    window.addEventListener(
+        "load",
+        async () => {
+            const hostname = window.location.hostname;
+            const isLocalDevelopment =
+                hostname === "localhost" ||
+                hostname.endsWith(".localhost") ||
+                /^127(?:\.\d{1,3}){3}$/.test(hostname) ||
+                hostname === "::1";
+            const appScope = new URL("./", window.location.href).href;
+
+            if (isLocalDevelopment) {
+                try {
+                    const registrations = await navigator.serviceWorker.getRegistrations();
+                    await Promise.all(
+                        registrations
+                            .filter(registration => registration.scope === appScope)
+                            .map(registration => registration.unregister())
+                    );
+                } catch (error) {
+                    console.error("TalkSpace localhost worker cleanup failed:", error);
+                }
+            }
+
+            try {
+                if ("caches" in window) {
+                    const cacheNames = await caches.keys();
+                    await Promise.all(
+                        cacheNames
+                            .filter(cacheName => cacheName.startsWith("talkspace-"))
+                            .map(cacheName => caches.delete(cacheName))
+                    );
+                }
+            } catch (error) {
+                console.error("TalkSpace legacy cache cleanup failed:", error);
+            }
+
+            if (!isLocalDevelopment) {
+                try {
+                    const registration = await navigator.serviceWorker.register(
+                        "./sw.js",
+                        { updateViaCache: "none" }
+                    );
+                    // Check for a deployment on each app load. Updates use the
+                    // browser's normal waiting lifecycle; an open call/chat is
+                    // never forcibly switched to a new page version.
+                    await registration.update();
+                } catch (error) {
+                    console.error("TalkSpace service worker update check failed:", error);
+                }
+            }
+        }
+    );
+
+}
+
+</script>
+
+
+</body>
+
+</html>

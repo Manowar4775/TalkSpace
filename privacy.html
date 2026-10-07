@@ -1,0 +1,79 @@
+<!DOCTYPE html>
+<html lang="en">
+
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <meta name="theme-color" content="#07110d">
+    <title>Privacy - TalkSpace</title>
+    <link rel="stylesheet" href="./src/style.css">
+</head>
+
+<body class="privacy-page">
+    <main class="card privacy-card" aria-labelledby="privacyTitle">
+        <header class="privacy-header">
+            <p class="privacy-eyebrow">TalkSpace</p>
+            <h1 id="privacyTitle">Privacy &amp; safety</h1>
+            <p class="subtitle">How privacy currently works in the app.</p>
+        </header>
+
+        <p class="privacy-intro">
+            This page describes protections and controls that are currently implemented.
+            It does not add privacy settings that the app cannot enforce.
+        </p>
+
+        <section class="privacy-section" aria-labelledby="privateCommunicationTitle">
+            <h2 id="privateCommunicationTitle">Private communication</h2>
+            <ul>
+                <li>Private chats and voice or video calls are available only between accepted friends.</li>
+                <li>If either person has blocked the other, messaging and calls are unavailable.</li>
+                <li>If TalkSpace cannot verify friendship or block status, it denies access instead of assuming it is allowed.</li>
+            </ul>
+        </section>
+
+        <section class="privacy-section" aria-labelledby="offlinePrivacyTitle">
+            <h2 id="offlinePrivacyTitle">When a friend is offline</h2>
+            <p>
+                A friend's private chat history and last-message preview are hidden while they are offline.
+                The message composer is unavailable, and calls cannot be started. Live updates use the same
+                access checks; an older in-progress request must not reveal chat content after the state changes.
+            </p>
+        </section>
+
+        <section class="privacy-section" aria-labelledby="informationTitle">
+            <h2 id="informationTitle">Information used to provide TalkSpace</h2>
+            <p>
+                TalkSpace uses Supabase Authentication for account access. The app also stores profile details
+                (username, display name, and avatar URL), friend-request and block records, online presence,
+                messages and their delivery or seen state, and call-signalling data needed for communication.
+                These features use the configured Supabase services for authentication, database storage, and
+                realtime updates.
+            </p>
+        </section>
+
+        <section class="privacy-section" aria-labelledby="controlsTitle">
+            <h2 id="controlsTitle">Controls available in the app</h2>
+            <ul>
+                <li>Block or unblock a person from the TalkSpace app. A block prevents private communication in either direction.</li>
+                <li>Use the chat's message controls to delete a message for yourself, delete it for everyone where available, or clear your chat view.</li>
+                <li>Manage your supported profile display name in Settings.</li>
+            </ul>
+        </section>
+
+        <section class="privacy-section" aria-labelledby="unavailableTitle">
+            <h2 id="unavailableTitle">Preferences not currently available</h2>
+            <p>
+                TalkSpace does not currently provide user-configurable controls for online visibility,
+                profile-field visibility, or a profile bio. Those options are not presented as active settings
+                because the current application does not support saving or enforcing them.
+            </p>
+        </section>
+
+        <nav class="privacy-navigation" aria-label="TalkSpace pages">
+            <a class="privacy-link" href="./index.html">Back to TalkSpace</a>
+            <a class="privacy-link privacy-link-secondary" href="./setting.html">Settings</a>
+        </nav>
+    </main>
+</body>
+
+</html>
